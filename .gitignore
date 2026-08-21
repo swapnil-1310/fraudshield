@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Database & storage
+backend/db/*.db
+backend/storage/temp/*
+backend/storage/faiss_index.bin
+backend/storage/faiss_id_map.json
+!backend/storage/temp/.gitkeep
+
+# Models (large files)
+backend/models/
+*.bin
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.temp
+temp/
+tmp/

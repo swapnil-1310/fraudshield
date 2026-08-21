@@ -1,0 +1,52 @@
+[
+  {
+    "reg_no": "INA000001234",
+    "name": "Ramesh Kumar Sharma",
+    "category": "Investment Adviser (RIA)",
+    "status": "VALID",
+    "valid_till": "2028-12-31",
+    "company": "Apex Capital Advisory Services",
+    "state": "Maharashtra",
+    "registered_email": "contact@apexcapital.in"
+  },
+  {
+    "reg_no": "INH000005678",
+    "name": "Priya V. Mehta",
+    "category": "Research Analyst (RA)",
+    "status": "VALID",
+    "valid_till": "2027-06-30",
+    "company": "ValueTrend Research",
+    "state": "Karnataka",
+    "registered_email": "priya@valuetrend.co.in"
+  },
+  {
+    "reg_no": "INZ000009999",
+    "name": "Zerodha Broking Ltd.",
+    "category": "Stock Broker",
+    "status": "VALID",
+    "valid_till": "2030-01-01",
+    "company": "Zerodha Broking Limited",
+    "state": "Karnataka",
+    "registered_email": "compliance@zerodha.com"
+  },
+  {
+    "reg_no": "INA000004321",
+    "name": "Suresh Trading Corp",
+    "category": "Investment Adviser",
+    "status": "SUSPENDED",
+    "valid_till": "2024-01-01",
+    "company": "Suresh Wealth Solutions",
+    "state": "Delhi",
+    "registered_email": "info@sureshwealth.com"
+  },
+  {
+    "reg_no": "INH000008888",
+    "name": "Alpha Tipsters India",
+    "category": "Research Analyst",
+    "status": "EXPIRED",
+    "valid_till": "2023-05-15",
+    "company": "Alpha Tips Ltd",
+    "state": "Gujarat",
+    "registered_email": "admin@alphatipsters.in"
+  }
+]
