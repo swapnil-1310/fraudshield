@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "FraudShield-SEBI Live",
+  "version": "1.0",
+  "description": "Real-time SEBI Fraud & Scam Protection for WhatsApp and Telegram Web.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web.whatsapp.com/*",
+        "https://web.telegram.org/*"
+      ],
+      "css": ["styles.css"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_title": "FraudShield-SEBI Settings"
+  }
+}

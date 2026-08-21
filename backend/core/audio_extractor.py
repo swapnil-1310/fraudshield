@@ -21,8 +21,11 @@ def extract_audio_from_video(video_path: str) -> Optional[str]:
 
     # Try FFmpeg subprocess
     try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_exe, "-y",
             "-i", video_path,
             "-vn",
             "-acodec", "pcm_s16le",

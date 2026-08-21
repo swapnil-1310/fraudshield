@@ -14,9 +14,11 @@ TEMP_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "")
 
 # Detection Thresholds
-DEEPFAKE_THRESHOLD = 0.55  # 55%+ confidence flags as AI generated
+DEEPFAKE_THRESHOLD = 0.65  # 65%+ confidence flags as AI generated
 SEBI_RISK_THRESHOLD = 0.60  # 60%+ risk score flags as SEBI Violation
 
 # Database Path

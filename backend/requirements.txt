@@ -16,3 +16,6 @@ google-genai>=1.0.0
 
 # Optional: For audio extraction (if ffmpeg not available as system command)
 # moviepy>=1.0.3
+imageio-ffmpeg
+groq
+requests

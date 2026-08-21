@@ -47,6 +47,10 @@ export default function MediaUploadModal({ onScanComplete }) {
 
         if (!res.ok) throw new Error('Video scan failed. Please check server connection.');
         const data = await res.json();
+        
+        // Add local video URL for real-time playback
+        data.videoUrl = URL.createObjectURL(selectedFile);
+        
         onScanComplete(data);
 
       } else {
@@ -78,50 +82,56 @@ export default function MediaUploadModal({ onScanComplete }) {
   };
 
   return (
-    <div className="glass-panel p-6 rounded-3xl border border-slate-800 shadow-2xl my-6">
+    <div className="fintech-card p-8">
       
-      {/* Mode Switcher */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-6">
-        <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Investigator Media Scanner</h2>
-          <p className="text-xs text-slate-400 mt-1 font-medium">
-            Scan video media or text tips for AI deepfake manipulation and SEBI compliance violations
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-          <button
-            type="button"
-            onClick={() => setActiveMode('video')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeMode === 'video' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Video className="w-4 h-4" />
-            <span>Video & Audio Scan</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveMode('text')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeMode === 'text' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Text Tip Analysis</span>
-          </button>
-        </div>
+      {/* Header */}
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-fintech-text tracking-tight uppercase">Dual Scanner</h2>
+        <p className="text-sm text-fintech-secondary font-medium mt-1">
+          Analyze suspicious financial content across visual, audio and text signals.
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      {/* Mode Switcher */}
+      <div className="flex space-x-4 mb-8">
+        <button
+          type="button"
+          onClick={() => setActiveMode('video')}
+          className={`flex-1 py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all ${
+            activeMode === 'video'
+              ? 'border-fintech-green bg-fintech-soft text-fintech-green'
+              : 'border-fintech-border bg-white text-fintech-secondary hover:border-fintech-green/30 hover:text-fintech-text'
+          }`}
+        >
+          <div className="flex items-center justify-center space-x-2">
+            <Video className="w-5 h-5" />
+            <span>VIDEO & AUDIO</span>
+          </div>
+          {activeMode === 'video' && <div className="mt-2 w-8 h-1 bg-fintech-green rounded-full mx-auto" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveMode('text')}
+          className={`flex-1 py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all ${
+            activeMode === 'text'
+              ? 'border-fintech-green bg-fintech-soft text-fintech-green'
+              : 'border-fintech-border bg-white text-fintech-secondary hover:border-fintech-green/30 hover:text-fintech-text'
+          }`}
+        >
+          <div className="flex items-center justify-center space-x-2">
+            <FileText className="w-5 h-5" />
+            <span>TEXT TIP</span>
+          </div>
+          {activeMode === 'text' && <div className="mt-2 w-8 h-1 bg-fintech-green rounded-full mx-auto" />}
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
         
         {/* Video Mode Dropzone */}
         {activeMode === 'video' ? (
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Select Investor Video File
-            </label>
-            <div className="relative border-2 border-dashed border-slate-700 hover:border-blue-500/80 rounded-2xl p-8 text-center bg-slate-900/50 transition-all cursor-pointer group">
+            <div className="relative border-2 border-dashed border-fintech-green/30 hover:border-fintech-green hover:bg-fintech-verysoft rounded-2xl p-10 text-center bg-white transition-all cursor-pointer group shadow-sm">
               <input
                 type="file"
                 accept="video/*"
@@ -129,81 +139,82 @@ export default function MediaUploadModal({ onScanComplete }) {
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
               <div className="flex flex-col items-center">
-                <div className="p-4 rounded-full bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
+                <div className="p-4 rounded-full bg-fintech-soft text-fintech-green group-hover:-translate-y-1 transition-transform">
                   <Upload className="w-8 h-8" />
                 </div>
-                <p className="mt-3 text-sm font-semibold text-white">
-                  {selectedFile ? selectedFile.name : 'Click to select or drag video file here'}
-                </p>
-                <p className="text-xs text-slate-400 mt-1 font-medium">
-                  Supports MP4, MOV, WEBM (Extracts visual deepfake frames + audio speech)
-                </p>
+                {selectedFile ? (
+                  <div className="mt-4">
+                    <p className="text-base font-bold text-fintech-text uppercase">{selectedFile.name}</p>
+                    <p className="text-sm font-mono text-fintech-action mt-1">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB • READY FOR ANALYSIS</p>
+                  </div>
+                ) : (
+                  <div className="mt-4">
+                    <p className="text-base font-bold text-fintech-secondary uppercase tracking-widest">DROP VIDEO EVIDENCE</p>
+                    <p className="text-sm font-medium text-fintech-secondary/70 mt-1">MP4 · MOV · WEBM</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         ) : (
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Investment Advice / Tip Content
-            </label>
             <textarea
-              rows={4}
+              rows={5}
               value={textTip}
               onChange={(e) => setTextTip(e.target.value)}
-              placeholder="Paste social media post, WhatsApp forward, or stock tip message here... (e.g. 'BUY $AAPL NOW! Guaranteed 100% returns in 7 days! Join VIP Telegram!')"
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+              placeholder="Paste a suspicious WhatsApp message, Telegram post, social media claim, or investment solicitation..."
+              className="w-full bg-white border border-fintech-border rounded-xl p-4 text-base text-fintech-text focus:outline-none focus:border-fintech-green focus:ring-1 focus:ring-fintech-green shadow-sm transition-all"
             />
           </div>
         )}
 
         {/* Optional SEBI Advisor Registration Number */}
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-            Claimed SEBI Registration Number (Optional)
+          <label className="block text-xs font-bold uppercase tracking-wider text-fintech-secondary mb-2">
+            Claimed SEBI Registration Number <span className="text-fintech-secondary/60 lowercase">(Optional)</span>
           </label>
           <input
             type="text"
             value={advisorRegNo}
             onChange={(e) => setAdvisorRegNo(e.target.value)}
-            placeholder="e.g. INH000005678 or INA000001234"
-            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+            placeholder="INA... / INH..."
+            className="w-full bg-fintech-verysoft border border-fintech-border rounded-xl px-4 py-3 text-sm text-fintech-text focus:outline-none focus:border-fintech-green font-mono uppercase shadow-inner"
           />
+          <p className="text-xs text-fintech-secondary mt-2">Used to cross-check the claimed regulatory identity.</p>
         </div>
 
         {/* Error message */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl text-xs font-semibold flex items-center">
-            <AlertTriangle className="w-4 h-4 mr-2 flex-shrink-0" />
+          <div className="bg-red-50 border border-red-200 text-fintech-red p-4 rounded-xl text-sm font-medium flex items-center shadow-sm">
+            <AlertTriangle className="w-5 h-5 mr-3 flex-shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Progress Step */}
+        {/* Intelligent Analysis Sequence */}
         {loading && (
-          <div className="bg-blue-500/10 border border-blue-500/30 text-blue-400 p-3.5 rounded-xl text-xs font-semibold flex items-center space-x-3 animate-pulse">
-            <Loader2 className="w-5 h-5 animate-spin flex-shrink-0 text-blue-400" />
-            <span>{progressStep}</span>
+          <div className="bg-white border border-fintech-border p-5 rounded-xl shadow-sm">
+            <div className="flex items-center space-x-3 mb-2">
+              <Loader2 className="w-5 h-5 animate-spin text-fintech-action" />
+              <span className="font-bold text-fintech-text uppercase tracking-wider text-sm">Forensic Analysis</span>
+            </div>
+            <p className="text-sm font-mono text-fintech-action ml-8">{progressStep}</p>
+            <div className="mt-3 w-full h-1 bg-fintech-soft rounded-full overflow-hidden">
+               <div className="h-full bg-fintech-action w-1/2 animate-pulse rounded-full"></div>
+            </div>
           </div>
         )}
 
         {/* Submit Button */}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-blue-500/25 flex items-center justify-center space-x-2 transition-all disabled:opacity-50 cursor-pointer"
-        >
-          {loading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Analyzing Media & SEBI Rules...</span>
-            </>
-          ) : (
-            <>
-              <span>Run Dual Visual & Audio SEBI Analysis</span>
-              <ArrowRight className="w-5 h-5" />
-            </>
-          )}
-        </button>
+        {!loading && (
+          <button
+            type="submit"
+            className="w-full py-4 bg-fintech-action hover:bg-fintech-dark text-white font-bold rounded-xl shadow-[0_4px_14px_0_rgba(22,160,93,0.39)] hover:shadow-[0_6px_20px_rgba(22,160,93,0.23)] hover:-translate-y-0.5 flex items-center justify-center space-x-2 transition-all"
+          >
+            <span className="text-base tracking-wide">Run Forensic Analysis</span>
+            <ArrowRight className="w-5 h-5" />
+          </button>
+        )}
 
       </form>
 

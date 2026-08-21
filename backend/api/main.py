@@ -16,6 +16,7 @@ from core.deepfake_vision import VisualDeepfakeDetector
 from core.audio_extractor import extract_audio_from_video
 from core.transcriber import transcribe_audio_file
 from core.sebi_compliance import analyze_sebi_compliance
+from core.screenshot_scanner import analyze_screenshot
 
 app = FastAPI(
     title="FraudShield-SEBI Pro API",
@@ -85,6 +86,11 @@ class DualVerdictResponse(BaseModel):
     confidence: Optional[str] = "MEDIUM"
     detected_schemes: Optional[List[str]] = []
     compliance_signals: Optional[List[str]] = []
+    
+    # New Visual Forensics Fields
+    watermark_detected: Optional[str] = "none"
+    gemini_reasoning: Optional[str] = ""
+    artifacts: Optional[List[str]] = []
 
 
 # ── Helper for Dual Verdict Classification ──────────────────────────────────
@@ -164,6 +170,9 @@ async def scan_video(
         is_deepfake = visual_res["is_deepfake"]
         deepfake_score = visual_res["score"]
         visual_summary = visual_res["summary"]
+        watermark_detected = visual_res.get("watermark_detected", "none")
+        gemini_reasoning = visual_res.get("gemini_reasoning", "")
+        artifacts = visual_res.get("artifacts", [])
 
         # Step 2: Audio Extraction
         audio_path = extract_audio_from_video(video_path)
@@ -218,7 +227,10 @@ async def scan_video(
             "status": "FLAGGED" if (is_deepfake or is_violation) else "SAFE",
             "confidence": sebi_res.get("confidence", "MEDIUM"),
             "detected_schemes": sebi_res.get("detected_schemes", ["none"]),
-            "compliance_signals": sebi_res.get("compliance_signals", [])
+            "compliance_signals": sebi_res.get("compliance_signals", []),
+            "watermark_detected": watermark_detected,
+            "gemini_reasoning": gemini_reasoning,
+            "artifacts": artifacts
         }
 
         # Save to SQLite database
@@ -230,6 +242,88 @@ async def scan_video(
         if os.path.exists(video_path):
             try:
                 os.remove(video_path)
+            except Exception:
+                pass
+
+@app.post("/api/scan-screenshot", response_model=DualVerdictResponse)
+async def scan_screenshot(
+    file: UploadFile = File(...),
+    advisor_reg_no: Optional[str] = Form("")
+):
+    """
+    Process uploaded screenshot (P&L, WhatsApp tip, app interface):
+    1. Send image to Gemini 1.5 Pro Multimodal.
+    2. Perform forensic OCR and visual UI inspection.
+    3. Return Dual Verdict (Visual fraud + SEBI rules).
+    """
+    filename = file.filename or "uploaded_screenshot.png"
+    suffix = os.path.splitext(filename)[1] or ".png"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=config.TEMP_DIR) as tmp:
+        tmp.write(await file.read())
+        image_path = tmp.name
+
+    try:
+        advisor_info = db.get_advisor(advisor_reg_no) if advisor_reg_no else None
+        advisor_status = advisor_info["status"] if advisor_info else ("NOT_PROVIDED" if not advisor_reg_no else "UNREGISTERED")
+
+        # Step 1: Visual Forensic Analysis via Gemini
+        sebi_res = analyze_screenshot(image_path)
+        is_violation = sebi_res["is_violation"]
+        sebi_risk_score = sebi_res["risk_score"]
+        sebi_summary = sebi_res["summary"]
+
+        if advisor_reg_no and not advisor_info:
+            is_violation = True
+            sebi_risk_score = max(sebi_risk_score, 0.85)
+            sebi_res["reasons"].append(f"Unregistered Advisor Reg No claimed: '{advisor_reg_no}'")
+            sebi_res["sebi_rules"].append("SEBI (Investment Advisers) Regulations 2013")
+
+        # For screenshots, if it's a fake P&L or UI manipulation, we consider it a deepfake/visual fraud
+        is_visual_fraud = "fake_pnl" in sebi_res.get("detected_schemes", []) or sebi_risk_score > 0.8
+        
+        # Step 2: Compute Dual Verdict
+        dual = compute_dual_verdict(is_visual_fraud, is_violation, sebi_risk_score, sebi_risk_score)
+
+        report_id = f"FLAG-{uuid.uuid4().hex[:8].upper()}"
+        timestamp = datetime.now().isoformat()
+
+        report_data = {
+            "id": report_id,
+            "timestamp": timestamp,
+            "media_type": "image",
+            "title": filename,
+            "is_deepfake": is_visual_fraud,
+            "deepfake_score": sebi_risk_score,
+            "visual_summary": sebi_summary,
+            "is_sebi_violation": is_violation,
+            "sebi_risk_score": sebi_risk_score,
+            "sebi_summary": sebi_summary,
+            "dual_verdict": dual["dual_verdict"],
+            "verdict_label": dual["verdict_label"],
+            "verdict_badge_color": dual["badge_color"],
+            "summary": dual["summary"],
+            "transcript": "N/A (Visual Text Extraction performed by Gemini)",
+            "reasons": sebi_res["reasons"],
+            "sebi_rules": sebi_res["sebi_rules"],
+            "advisor_reg_no": advisor_reg_no,
+            "advisor_status": advisor_status,
+            "status": "FLAGGED" if (is_visual_fraud or is_violation) else "SAFE",
+            "confidence": sebi_res.get("confidence", "MEDIUM"),
+            "detected_schemes": sebi_res.get("detected_schemes", ["none"]),
+            "compliance_signals": [],
+            "watermark_detected": "none",
+            "gemini_reasoning": sebi_summary,
+            "artifacts": []
+        }
+
+        db.save_scan_report(report_data)
+        return DualVerdictResponse(**report_data)
+
+    finally:
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
             except Exception:
                 pass
 

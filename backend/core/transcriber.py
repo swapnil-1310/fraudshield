@@ -1,25 +1,23 @@
 import os
 import sys
-import re
-from pathlib import Path
 from typing import Dict, Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 
 try:
-    import google.generativeai as genai
-    if config.GEMINI_API_KEY:
-        genai.configure(api_key=config.GEMINI_API_KEY)
-        HAS_GEMINI = True
+    from groq import Groq
+    if config.GROQ_API_KEY:
+        _groq_client = Groq(api_key=config.GROQ_API_KEY)
+        HAS_GROQ = True
     else:
-        HAS_GEMINI = False
+        HAS_GROQ = False
 except Exception:
-    HAS_GEMINI = False
+    HAS_GROQ = False
 
 def transcribe_audio_file(audio_path: str) -> Dict[str, Any]:
     """
-    Transcribe audio file into text using Gemini Multimodal or Fallback.
+    Transcribe audio file into text using Groq Whisper-Large-V3 (SOTA).
     """
     if not audio_path or not os.path.exists(audio_path):
         return {
@@ -29,30 +27,38 @@ def transcribe_audio_file(audio_path: str) -> Dict[str, Any]:
             "message": "Audio file not available."
         }
 
-    # 1. Try Gemini Multimodal audio file upload if API Key provided
-    if HAS_GEMINI and config.GEMINI_API_KEY:
+    # Try Groq API for state-of-the-art transcription
+    if HAS_GROQ and config.GROQ_API_KEY:
         try:
-            print(f"[Transcriber] Uploading audio to Gemini API: {audio_path}...")
-            audio_file = genai.upload_file(path=audio_path)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content([
-                audio_file,
-                "Please transcribe the spoken audio in this file verbatim into clear English/Hindi text."
-            ])
-            transcript_text = response.text.strip()
+            print(f"[Transcriber] Uploading audio to Groq Whisper: {audio_path}...")
+            with open(audio_path, "rb") as file:
+                transcription = _groq_client.audio.transcriptions.create(
+                    file=(os.path.basename(audio_path), file.read()),
+                    model="whisper-large-v3",
+                    response_format="verbose_json",
+                    temperature=0.0
+                )
+            
+            transcript_text = transcription.text.strip()
+            
+            # Whisper sometimes hallucinates silence as 'Thank you for watching' or 'Amara.org'
+            hallucinations = ["Thank you.", "Thank you", "Subscribe to the channel", "Amara.org", "you"]
+            if transcript_text in hallucinations or len(transcript_text) < 2:
+                transcript_text = ""
+
             return {
                 "transcript": transcript_text,
                 "success": True,
-                "engine": "gemini-1.5-flash",
-                "message": "Transcription completed via Gemini Multimodal API"
+                "engine": "whisper-large-v3",
+                "message": "Transcription completed via Groq Whisper API"
             }
         except Exception as e:
-            print(f"Gemini audio upload note: {e}")
+            print(f"Groq audio upload note: {e}")
 
-    # 2. Fallback Speech-to-Text simulation for testing
+    # Fallback if API fails or no key
     return {
-        "transcript": "Special stock tip offer: Guaranteeing 50% profit in 7 days! Join our private VIP Telegram channel for daily jackpot stock calls.",
-        "success": True,
-        "engine": "fallback_speech_evaluator",
-        "message": "Extracted audio transcript for analysis"
+        "transcript": "",
+        "success": False,
+        "engine": "fallback",
+        "message": "Transcription unavailable or failed."
     }

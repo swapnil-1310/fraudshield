@@ -45,12 +45,12 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
 
     # ── TIER A: Definitive Violations (weight 0.75–1.00) ─────────────────────
     (
-        r"\b(guarante[ed]{1,2}|assured?)\b.{0,50}\b(return|profit|gain|yield|income|money|\d+\s*%)\b",
+        r"\b(guarante[ed]{1,2}|assured?)\b.{0,50}\b(returns?|profits?|gains?|yields?|income|money|\d+\s*%)\b",
         0.90, "Guaranteed/assured returns — core SEBI fraud indicator",
         "SEBI (Investment Advisers) Regulations 2013 — Reg 7A; SEBI FUTP 2003 — Reg 3"
     ),
     (
-        r"\b100\s*%\s*(safe|profit|return|guaranteed|sure|certain|accurate|success|accurate)\b",
+        r"\b100\s*%\s*(safe|profits?|returns?|guaranteed|sure|certain|accurate|success|accurate)\b",
         0.88, "100% certainty claim for financial outcomes",
         "SEBI IA Regulations 2013 — Reg 7A(c)"
     ),
@@ -62,7 +62,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
     (
         r"\bdouble\b.{0,35}\b(money|investment|capital|wealth|portfolio|fund)\b",
         0.82, "Promise to double money — Ponzi/pump-and-dump framing",
-        "SEBI FUTP Regulations 2003 — Reg 3 & 4"
+        "SEBI FUTP Regulations 2003 — Reg 4 & 4"
     ),
     (
         r"\b(insider|inside information|confidential tip|inside tip|insider trading)\b",
@@ -80,7 +80,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         "SEBI Act 1992 — Section 11; SEBI FUTP 2003"
     ),
     (
-        r"\b(fixed\s*return|monthly\s*return|weekly\s*return|daily\s*profit)\b.{0,30}\b(\d+\s*%|rs\.?|₹|\d+\s*rupee)\b",
+        r"\b(fixed\s*returns?|monthly\s*returns?|weekly\s*returns?|daily\s*profits?)\b.{0,30}\b(\d+\s*%|rs\.?|₹|\d+\s*rupee)\b",
         0.80, "Periodic fixed return promise with specific figures — Ponzi structure",
         "SEBI (Collective Investment Schemes) Regulations 1999; SEBI FUTP 2003"
     ),
@@ -90,7 +90,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         "SEBI FUTP Regulations 2003 — Reg 4(2)(a)(b)"
     ),
     (
-        r"\b(pay after profit|profit sharing fee|success fee|commission after gain|pay after returns)\b",
+        r"\b(pay after profit|profit sharing fee|success fee|commission after gain|pay after returns?)\b",
         0.75, "Illegal profit-linked fee structure",
         "SEBI IA Regulations 2013 — Reg 13(d)"
     ),
@@ -107,7 +107,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         "SEBI Circular SEBI/HO/MIRSD/MIRSD-PoD-1/P/CIR/2023/123"
     ),
     (
-        r"\b(subscribe|subscription|paid plan|premium plan|membership fee)\b.{0,50}\b(stock|tip|call|alert|signal|profit|return)\b",
+        r"\b(subscribe|subscription|paid plan|premium plan|membership fee)\b.{0,50}\b(stock|tip|call|alert|signal|profits?|returns?)\b",
         0.62, "Subscription fee for unregistered stock tip advisory service",
         "SEBI (Research Analysts) Regulations 2014 — Reg 3"
     ),
@@ -127,7 +127,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         "SEBI (Research Analysts) Regulations 2014 — Reg 3"
     ),
     (
-        r"\b(breakout\s*alert|urgent\s*buy|hot\s*tip|target\s*\d+|strong\s*buy)\b.{0,60}\b(limited|hurry|fast|now|today|seats|slots)\b",
+        r"\b(breakout\s*alert|urgent\s*buy|hot\s*tip|target\s*\d+|strong\s*buy)\b.{0,60}\b(limited|hurry|fast|now|today|seats|slots|registrations?)\b",
         0.58, "Urgent advisory with scarcity pressure without regulatory disclaimers",
         "SEBI RA Regulations 2014 — Reg 23"
     ),
@@ -137,7 +137,7 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         "SEBI FUTP Regulations 2003 — Reg 4(1)"
     ),
     (
-        r"\b(limited\s*(seats?|slots?|members?|spots?))\b.{0,50}\b(join|subscribe|register|enrol)\b",
+        r"\blimited\b.{0,30}\b(seats?|slots?|members?|spots?|registrations?)\b.{0,50}\b(join|subscribe|register|enrol|available)\b",
         0.52, "Artificial scarcity framing to drive FOMO-based subscriptions",
         "SEBI IA Regulations 2013 — Reg 7A"
     ),
@@ -253,7 +253,7 @@ def _call_gemini(prompt: str) -> str:
     if _gemini_client and _gemini_client != "legacy":
         # New google-genai SDK
         response = _gemini_client.models.generate_content(
-            model="gemini-1.5-pro",
+            model="gemini-3.6-flash",
             contents=prompt,
             config={
                 "temperature": 0.1,
@@ -267,7 +267,7 @@ def _call_gemini(prompt: str) -> str:
         # Fallback to old SDK
         import google.generativeai as genai_legacy
         model = genai_legacy.GenerativeModel(
-            "gemini-1.5-pro",
+            "gemini-3.6-flash",
             generation_config={"temperature": 0.1, "top_p": 0.95, "max_output_tokens": 1024}
         )
         response = model.generate_content(prompt)
