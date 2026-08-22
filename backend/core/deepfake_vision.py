@@ -220,8 +220,17 @@ class VisualDeepfakeDetector:
     def _load_model(self):
         if config.HUGGINGFACE_API_KEY:
             print(f"[DeepfakeVision] HuggingFace API key found. Will use serverless inference for '{self.model_name}'.")
+        elif HAS_TRANSFORMERS:
+            try:
+                print(f"[DeepfakeVision] Loading HuggingFace model '{self.model_name}' locally...")
+                from transformers import pipeline
+                self.model = pipeline("image-classification", model=self.model_name, device=0 if self.device=="cuda" else -1)
+                print("[DeepfakeVision] Local HuggingFace model loaded successfully.")
+            except Exception as e:
+                print(f"[DeepfakeVision] Failed to load local HF model: {e}")
+                self.model = None
         else:
-            print("[DeepfakeVision] No HuggingFace API key. Using Gemini Vision + OpenCV fallback.")
+            print("[DeepfakeVision] No HuggingFace API key and transformers not installed. Using Gemini Vision + OpenCV fallback.")
 
     def analyze_frame(self, frame_bgr: np.ndarray) -> Dict[str, Any]:
         """Analyze a single BGR frame through the 3-layer pipeline."""
@@ -272,6 +281,27 @@ class VisualDeepfakeDetector:
                     }
             except Exception as e:
                 print(f"[DeepfakeVision] HF API inference note: {e}")
+        elif self.model is not None:
+            # ── Local HuggingFace ViT Inference ──────────────
+            try:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(frame_rgb)
+                results = self.model(pil_img)
+                
+                ai_conf = 0.0
+                for res in results:
+                    if any(kw in str(res.get('label', '')).lower() for kw in ['fake', 'ai', 'synthetic', 'generated']):
+                        ai_conf = float(res.get('score', 0.0))
+                        break
+                
+                return {
+                    "is_ai": ai_conf >= config.DEEPFAKE_THRESHOLD,
+                    "ai_confidence": round(ai_conf, 4),
+                    "watermark": "none",
+                    "method": "local_hf_transformers"
+                }
+            except Exception as e:
+                print(f"[DeepfakeVision] Local HF inference note: {e}")
 
         # ── Layer 3: OpenCV Heuristic (texture + frequency analysis) ─────────
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
@@ -408,14 +438,14 @@ class VisualDeepfakeDetector:
             watermark_detected = watermark_hits[0]
             base_score = max(base_score, 0.88)  # Watermark = minimum 88%
 
-        # ── Gemini Vision deep analysis on keyframes ──────────────────────────
+        # ── Gemini Vision deep analysis on keyframes (only when NOT in offline mode) ──
         gemini_reasoning = ""
         gemini_artifacts = []
         gemini_watermark = "none"
         gemini_score = None
 
-        if HAS_GEMINI_VISION and keyframes_for_gemini:
-            # Analyze the middle keyframe (most representative)
+        if HAS_GEMINI_VISION and keyframes_for_gemini and not config.PREFER_LOCAL:
+            # Only use Gemini when explicitly in API mode
             target_frame = keyframes_for_gemini[len(keyframes_for_gemini) // 2]
             gemini_result = _gemini_vision_analyze_frame(target_frame)
 

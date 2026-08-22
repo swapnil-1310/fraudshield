@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, Video, FileText, Loader2, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Upload, Video, FileText, Mic, Loader2, CheckCircle2, AlertTriangle, ArrowRight } from 'lucide-react';
 
 export default function MediaUploadModal({ onScanComplete }) {
   const [activeMode, setActiveMode] = useState('video'); // 'video' | 'text'
@@ -51,6 +51,30 @@ export default function MediaUploadModal({ onScanComplete }) {
         // Add local video URL for real-time playback
         data.videoUrl = URL.createObjectURL(selectedFile);
         
+        onScanComplete(data);
+
+      } else if (activeMode === 'audio') {
+        if (!selectedFile) {
+          setError('Please select an audio file (.mp3, .wav, .m4a)');
+          setLoading(false);
+          return;
+        }
+
+        setProgressStep('Step 1/2: Transcribing speech to text transcript via Groq Whisper...');
+        
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('advisor_reg_no', advisorRegNo);
+
+        setTimeout(() => setProgressStep('Step 2/2: Evaluating spoken claims against SEBI guidelines...'), 2000);
+
+        const res = await fetch('http://127.0.0.1:8000/api/scan-audio', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) throw new Error('Audio scan failed. Please check server connection.');
+        const data = await res.json();
         onScanComplete(data);
 
       } else {
@@ -105,14 +129,29 @@ export default function MediaUploadModal({ onScanComplete }) {
         >
           <div className="flex items-center justify-center space-x-2">
             <Video className="w-5 h-5" />
-            <span>VIDEO & AUDIO</span>
+            <span>VIDEO</span>
           </div>
           {activeMode === 'video' && <div className="mt-2 w-8 h-1 bg-fintech-green rounded-full mx-auto" />}
         </button>
         <button
           type="button"
+          onClick={() => setActiveMode('audio')}
+          className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${
+            activeMode === 'audio'
+              ? 'border-fintech-green bg-fintech-soft text-fintech-green'
+              : 'border-fintech-border bg-white text-fintech-secondary hover:border-fintech-green/30 hover:text-fintech-text'
+          }`}
+        >
+          <div className="flex items-center justify-center space-x-2">
+            <Mic className="w-5 h-5" />
+            <span>AUDIO</span>
+          </div>
+          {activeMode === 'audio' && <div className="mt-2 w-8 h-1 bg-fintech-green rounded-full mx-auto" />}
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveMode('text')}
-          className={`flex-1 py-3 px-4 rounded-xl text-sm font-semibold border-2 transition-all ${
+          className={`flex-1 py-3 px-2 rounded-xl text-sm font-semibold border-2 transition-all ${
             activeMode === 'text'
               ? 'border-fintech-green bg-fintech-soft text-fintech-green'
               : 'border-fintech-border bg-white text-fintech-secondary hover:border-fintech-green/30 hover:text-fintech-text'
@@ -151,6 +190,33 @@ export default function MediaUploadModal({ onScanComplete }) {
                   <div className="mt-4">
                     <p className="text-base font-bold text-fintech-secondary uppercase tracking-widest">DROP VIDEO EVIDENCE</p>
                     <p className="text-sm font-medium text-fintech-secondary/70 mt-1">MP4 · MOV · WEBM</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : activeMode === 'audio' ? (
+          <div>
+            <div className="relative border-2 border-dashed border-fintech-green/30 hover:border-fintech-green hover:bg-fintech-verysoft rounded-2xl p-10 text-center bg-white transition-all cursor-pointer group shadow-sm">
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleFileChange}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <div className="flex flex-col items-center">
+                <div className="p-4 rounded-full bg-fintech-soft text-fintech-green group-hover:-translate-y-1 transition-transform">
+                  <Mic className="w-8 h-8" />
+                </div>
+                {selectedFile ? (
+                  <div className="mt-4">
+                    <p className="text-base font-bold text-fintech-text uppercase">{selectedFile.name}</p>
+                    <p className="text-sm font-mono text-fintech-action mt-1">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB • READY FOR ANALYSIS</p>
+                  </div>
+                ) : (
+                  <div className="mt-4">
+                    <p className="text-base font-bold text-fintech-secondary uppercase tracking-widest">DROP AUDIO RECORDING</p>
+                    <p className="text-sm font-medium text-fintech-secondary/70 mt-1">MP3 · WAV · M4A</p>
                   </div>
                 )}
               </div>

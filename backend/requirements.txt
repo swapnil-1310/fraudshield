@@ -8,14 +8,18 @@ Pillow>=10.0.0
 google-generativeai>=0.8.0
 google-genai>=1.0.0
 
-# Optional: For full Vision ViT deepfake detection model
-# torch>=2.0.0
-# transformers>=4.35.0
-# deepface>=0.0.79
-# faiss-cpu>=1.7.4
+# Offline / Local Models (GPU-accelerated on RTX 3050)
+torch>=2.0.0
+transformers>=4.35.0
+faster-whisper>=1.0.0
+easyocr>=1.7.1
+
+# TF-IDF for offline SEBI compliance scoring
+scikit-learn>=1.3.0
 
 # Optional: For audio extraction (if ffmpeg not available as system command)
-# moviepy>=1.0.3
+moviepy>=1.0.3
 imageio-ffmpeg
+
 groq
 requests

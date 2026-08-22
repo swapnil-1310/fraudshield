@@ -1,10 +1,12 @@
 """
-FraudShield-SEBI Pro — High Accuracy SEBI Compliance Engine v2
-==============================================================
-Multi-layer forensic detection:
-  Layer 1 — Structural Pre-scan (24+ regex signals with calibrated weights)
-  Layer 2 — Gemini 1.5 Pro Deep Chain-of-Thought Forensic Analysis
-  Layer 3 — Ensemble Confidence Calibration & Evidence Assembly
+FraudShield-SEBI Pro — High Accuracy SEBI Compliance Engine v3 (Fully Offline)
+=================================================================================
+Multi-layer forensic detection running 100% locally:
+  Layer 1   — Structural Pre-scan (28+ regex signals with calibrated weights)
+  Layer 1.5 — TF-IDF Keyword Density Scorer (catches rephrased scam language)
+  Layer 2   — Ensemble Confidence Calibration & Evidence Assembly
+
+Engine Architecture documented in: core/prompts.py → SEBI_OFFLINE_ENGINE_DESCRIPTION
 """
 
 import os
@@ -15,25 +17,6 @@ from typing import Dict, Any, List, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
-
-HAS_GEMINI = False
-_gemini_client = None
-
-try:
-    from google import genai as google_genai
-    if config.GEMINI_API_KEY:
-        _gemini_client = google_genai.Client(api_key=config.GEMINI_API_KEY)
-        HAS_GEMINI = True
-except Exception:
-    # Fallback to old SDK if new not available
-    try:
-        import google.generativeai as genai_legacy
-        if config.GEMINI_API_KEY:
-            genai_legacy.configure(api_key=config.GEMINI_API_KEY)
-            HAS_GEMINI = True
-            _gemini_client = "legacy"
-    except Exception:
-        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -93,6 +76,26 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         r"\b(pay after profit|profit sharing fee|success fee|commission after gain|pay after returns?)\b",
         0.75, "Illegal profit-linked fee structure",
         "SEBI IA Regulations 2013 — Reg 13(d)"
+    ),
+    (
+        r"\b(front[- ]?running|front[- ]?run|trade before|buy before announcement)\b",
+        0.92, "Front-running — trading ahead of client orders or material info",
+        "SEBI FUTP Regulations 2003 — Reg 4(2)(q); SEBI (Prohibition of Insider Trading) Regulations 2015"
+    ),
+    (
+        r"\b(spoofing|layering|fake orders?|wash trade|wash trading|circular trading)\b",
+        0.90, "Market manipulation via spoofing, layering, or wash trading",
+        "SEBI FUTP Regulations 2003 — Reg 4(2)(a)(g)"
+    ),
+    (
+        r"\b(sebi\s*officer|sebi\s*official|on behalf of sebi|sebi\s*notice|sebi\s*penalty)\b.{0,50}\b(pay|deposit|transfer|send|urgent)\b",
+        0.95, "Impersonation of SEBI officials demanding payments — extortion scam",
+        "SEBI Act 1992; IPC Section 170, 419, 420"
+    ),
+    (
+        r"\b(crypto|bitcoin|ethereum|nft)\b.{0,40}\b(guaranteed|assured|100%|risk.?free|double|triple)\b",
+        0.85, "Guaranteed returns on unregulated crypto assets",
+        "SEBI Circular 2019; RBI Advisory on Virtual Currencies"
     ),
 
     # ── TIER B: Strong Indicators (weight 0.45–0.74) ─────────────────────────
@@ -166,6 +169,21 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         0.70, "Explicit admission of operating without SEBI registration",
         "SEBI IA Regulations 2013 — Reg 3"
     ),
+    (
+        r"\b(client|member|subscriber)\s*(earned|made|got|received)\s*(rs\.?|₹|inr)?\s*\d+",
+        0.55, "Unverified client testimonial with specific profit figures",
+        "SEBI RA Regulations 2014 — Reg 16(a)"
+    ),
+    (
+        r"\b(market\s*crash|crash\s*alert|sell\s*everything|emergency\s*exit|panic)\b.{0,40}\b(now|immediately|urgent|today|before)\b",
+        0.52, "Fear-based urgency manipulation to induce panic selling",
+        "SEBI FUTP Regulations 2003 — Reg 4(2)(a)"
+    ),
+    (
+        r"\b(we\s*will\s*manage|we\s*manage\s*your|hand\s*over\s*your|give\s*us\s*your)\b.{0,30}\b(portfolio|account|demat|trading)\b",
+        0.78, "Unauthorized portfolio management service without SEBI PMS registration",
+        "SEBI (Portfolio Managers) Regulations 2020 — Reg 3"
+    ),
 
     # ── TIER C: Moderate/Contextual Signals (weight 0.25–0.44) ──────────────
     (
@@ -187,6 +205,11 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
         r"\b(sebi\s*registered|sebi\s*certified|sebi\s*authorised)\b.{0,60}\b(without|no|not|fake|false)\b",
         0.95, "Falsely claiming SEBI authorisation",
         "SEBI IA Regulations 2013 — Reg 3; IPC Section 420"
+    ),
+    (
+        r"\b(for\s*educational\s*purposes?)\b.{0,80}\b(buy|sell|target|stop\s*loss|sl|tgt|entry|exit)\b",
+        0.45, "Educational disclaimer contradicted by specific actionable buy/sell recommendations",
+        "SEBI RA Regulations 2014 — Reg 3"
     ),
 
     # ── TIER D: Compliance Positive Signals (NEGATIVE weights reduce score) ──
@@ -223,6 +246,110 @@ FORENSIC_SIGNALS: List[Tuple[str, float, str, str]] = [
 ]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LAYER 1.5 — TF-IDF Keyword Density Scorer
+# Catches rephrased scam language that exact regex misses
+# ─────────────────────────────────────────────────────────────────────────────
+
+FRAUD_VOCABULARY = [
+    "guaranteed", "assured", "certain", "definite", "risk-free", "zero risk",
+    "100%", "double", "triple", "quadruple", "multiply",
+    "fixed returns", "monthly income", "daily profit", "weekly earnings",
+    "urgent", "hurry", "limited", "exclusive", "only today", "last chance",
+    "act now", "don't miss", "once in lifetime", "fast booking",
+    "join group", "premium channel", "vip access", "paid tips",
+    "subscription", "membership", "enroll now", "register today",
+    "our team", "our experts", "our analysts", "our research",
+    "operator", "insider", "confidential", "secret", "private info",
+    "big move", "massive rally", "rocket", "moon", "circuit",
+    "pump", "dump", "jackpot", "sureshot", "sure shot", "multibagger",
+    "stop loss", "target", "entry", "exit", "buy call", "sell call",
+    "intraday", "swing", "positional", "futures", "options", "nifty",
+    "bank nifty", "sensex", "equity", "commodity", "forex",
+    "screenshot", "p&l", "profit loss", "portfolio", "trading app",
+    "demat account", "broker", "referral", "commission", "cashback",
+    "pay after profit", "profit sharing", "success fee",
+    "years of experience", "track record", "accuracy", "success rate",
+    "winning rate", "verified", "proven", "tested", "backtested",
+]
+
+SCAM_ARCHETYPES = [
+    "join our premium telegram for guaranteed returns with 95% accuracy",
+    "our research team gives sureshot calls with zero risk and fixed monthly income",
+    "operator backed stock tip with target 500 buy now limited seats available",
+    "insider information on upcoming IPO double your money in 30 days guaranteed",
+    "pay after profit subscription plan for VIP stock tips on WhatsApp",
+    "100% accurate calls with multibagger returns join our exclusive channel",
+    "we manage your portfolio with assured returns of 40% monthly",
+    "SEBI registered advisor guaranteed profits join premium group now limited slots",
+]
+
+_tfidf_vectorizer = None
+_scam_vectors = None
+
+
+def _get_tfidf_scorer():
+    """Initialize TF-IDF vectorizer with fraud vocabulary (lazy load)."""
+    global _tfidf_vectorizer, _scam_vectors
+
+    if _tfidf_vectorizer is not None:
+        return _tfidf_vectorizer, _scam_vectors
+
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        _tfidf_vectorizer = TfidfVectorizer(
+            vocabulary=None,
+            max_features=500,
+            ngram_range=(1, 2),
+            stop_words="english"
+        )
+        _scam_vectors = _tfidf_vectorizer.fit_transform(SCAM_ARCHETYPES)
+
+        print("[SEBI Engine] TF-IDF scorer initialized with fraud vocabulary.")
+        return _tfidf_vectorizer, _scam_vectors
+    except ImportError:
+        print("[SEBI Engine] scikit-learn not installed. TF-IDF scoring disabled.")
+        return None, None
+    except Exception as e:
+        print(f"[SEBI Engine] TF-IDF init error: {e}")
+        return None, None
+
+
+def _compute_tfidf_score(text: str) -> float:
+    """
+    Layer 1.5: Compute TF-IDF similarity between input text and known scam archetypes.
+    Returns a score between 0.0 and 1.0.
+    """
+    vectorizer, scam_vecs = _get_tfidf_scorer()
+    if vectorizer is None or scam_vecs is None:
+        return 0.0
+
+    try:
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        text_vector = vectorizer.transform([text.lower()])
+        similarities = cosine_similarity(text_vector, scam_vecs)[0]
+
+        max_sim = float(max(similarities)) if len(similarities) > 0 else 0.0
+        avg_sim = float(sum(similarities) / len(similarities)) if len(similarities) > 0 else 0.0
+
+        tfidf_score = 0.65 * max_sim + 0.35 * avg_sim
+
+        words = text.lower().split()
+        if len(words) > 0:
+            fraud_word_set = set(w.lower() for w in FRAUD_VOCABULARY)
+            fraud_count = sum(1 for w in words if w in fraud_word_set)
+            density = fraud_count / len(words)
+            density_score = min(density / 0.15, 1.0) * 0.3
+            tfidf_score = min(tfidf_score + density_score, 1.0)
+
+        return round(tfidf_score, 4)
+    except Exception as e:
+        print(f"[SEBI Engine] TF-IDF scoring error: {e}")
+        return 0.0
+
+
 def _run_forensic_scan(text: str) -> Tuple[float, List[str], List[str]]:
     """Layer 1: Structural forensic pre-scan."""
     text_lower = text.lower().strip()
@@ -237,7 +364,6 @@ def _run_forensic_scan(text: str) -> Tuple[float, List[str], List[str]]:
             if not label.startswith("[COMPLIANT]"):
                 rules.add(rule)
 
-    # Short messages with any positive signal are more likely to be forwarded scam tips
     word_count = len(text.split())
     if word_count < 25 and score > 0.1:
         score *= 1.20
@@ -246,107 +372,14 @@ def _run_forensic_scan(text: str) -> Tuple[float, List[str], List[str]]:
     return score, reasons, list(rules)
 
 
-def _call_gemini(prompt: str) -> str:
-    """Call Gemini API, preferring new google-genai SDK, falling back to old package."""
-    global _gemini_client
-
-    if _gemini_client and _gemini_client != "legacy":
-        # New google-genai SDK
-        response = _gemini_client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=prompt,
-            config={
-                "temperature": 0.1,
-                "top_p": 0.95,
-                "max_output_tokens": 1024,
-            }
-        )
-        return response.text.strip()
-
-    if _gemini_client == "legacy":
-        # Fallback to old SDK
-        import google.generativeai as genai_legacy
-        model = genai_legacy.GenerativeModel(
-            "gemini-3.6-flash",
-            generation_config={"temperature": 0.1, "top_p": 0.95, "max_output_tokens": 1024}
-        )
-        response = model.generate_content(prompt)
-        return response.text.strip()
-
-    raise RuntimeError("No Gemini API client available")
-
-
-def _build_forensic_prompt(transcript: str, advisor_reg_no: str, pre_score: float, pre_reasons: List[str]) -> str:
-    signals_block = "\n".join(f"  • {r}" for r in pre_reasons[:12]) if pre_reasons else "  None detected"
-
-    return f"""You are Dr. Ananya Sharma, Senior Director of Market Intelligence and Investor Protection at SEBI, with 18 years of forensic enforcement experience. You have reviewed hundreds of real fraud cases.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COMMUNICATION UNDER FORENSIC AUDIT:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"{transcript}"
-
-CLAIMED ADVISOR REGISTRATION: "{advisor_reg_no or 'NOT PROVIDED'}"
-PRE-SCAN FORENSIC SCORE: {pre_score:.2f} / 1.00
-PRE-SCAN SIGNALS DETECTED:
-{signals_block}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-FORENSIC EVALUATION MANDATE — Check ALL categories, including subtle ones:
-
-1. GUARANTEED/ASSURED RETURNS: Explicit (\"guaranteed 80%\") OR implicit (\"our team delivers consistent 40% monthly\") return promises.
-2. MISLEADING ACCURACY STATS: Claiming \"95% accuracy\" or \"3-year track record\" without SEBI-verified audit certificate.
-3. UNREGISTERED ADVISORY: Providing investment advice, stock tips, or research calls without citing valid SEBI RA/IA Registration Number.
-4. PAID SUBSCRIPTION WITHOUT SEBI REGISTRATION: Charging subscription fees for tip services without SEBI Research Analyst (RA) authorisation.
-5. OPERATOR/INSIDER SIGNALS: References to \"operator-backed\", confidential price targets, or non-public information.
-6. URGENCY & SCARCITY PRESSURE: \"Limited seats\", \"only today\", \"act now\" language to force decisions.
-7. PUMP-AND-DUMP SIGNALS: Viral/forward chain distribution, operator target prices, coordinated buy calls.
-8. FEE STRUCTURE VIOLATIONS: Profit-sharing, pay-after-profit, undisclosed commissions.
-9. LEGITIMATE MARKERS: Proper SEBI registration number cited, risk disclaimers, educational framing, referral to qualified advisors.
-
-IMPORTANT PRECISION NOTES:
-- \"Our research team identified a breakout in ZOMATO, 93% accuracy over 3 years\" → This IS a violation: unverified accuracy claim + unregistered tip = SEBI RA Reg 16(a) + Reg 3.
-- \"I think TCS will outperform based on Q3 results\" → This is NOT a violation: personal opinion without paid service.
-- \"Join our premium Telegram for real-time alerts\" without SEBI RA number → Definitive violation.
-- Saying \"this is for educational purposes only\" while giving specific buy/sell calls simultaneously does NOT cancel the violation.
-
-RISK_SCORE CALIBRATION:
-- 0.85-1.00 → Multiple clear violations. High confidence scam.
-- 0.65-0.84 → Strong violation. Even sophisticated/evasive phrasing.
-- 0.45-0.64 → Suspicious. Borderline. Would escalate for regulatory review.
-- 0.25-0.44 → Questionable but insufficient alone. Low risk.
-- 0.05-0.24 → Legitimate. Well-disclosed. Compliant.
-
-Respond with ONLY valid JSON (no markdown fences, no extra text):
-{{"is_violation": true_or_false, "risk_score": 0.00_to_1.00, "verdict": "SEBI_VIOLATION" or "WATCH" or "COMPLIANT", "confidence": "HIGH" or "MEDIUM" or "LOW", "summary": "Precise 1-2 sentence forensic summary citing exact phrases", "reasons": ["Finding 1 with quoted text evidence", "Finding 2", "Finding 3"], "sebi_rules": ["SEBI (Research Analysts) Regulations 2014 — Reg X", "SEBI FUTP 2003 — Reg Y"], "detected_schemes": ["pump_dump", "paid_group", "ponzi", "insider_tip", "impersonation", "none"], "compliance_signals": ["any legitimate marker found or none"]}}"""
-
-
-def _extract_json(raw: str) -> dict:
-    """Robustly extract JSON from Gemini response."""
-    # Try: bare JSON object
-    m = re.search(r"(\{[\s\S]*?\})\s*$", raw.strip())
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except Exception:
-            pass
-    # Try: JSON in code block
-    m2 = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw)
-    if m2:
-        try:
-            return json.loads(m2.group(1))
-        except Exception:
-            pass
-    # Try full string
-    try:
-        return json.loads(raw)
-    except Exception:
-        pass
-    return {}
-
-
 def analyze_sebi_compliance(transcript: str, advisor_reg_no: str = "") -> Dict[str, Any]:
-    """Multi-layer forensic SEBI compliance analysis."""
+    """
+    Fully offline multi-layer forensic SEBI compliance analysis.
+
+    Layer 1:   Regex forensic pre-scan (28+ signals)
+    Layer 1.5: TF-IDF keyword density scorer
+    Layer 2:   Ensemble calibration & evidence assembly
+    """
 
     if not transcript or not transcript.strip():
         return {
@@ -359,80 +392,54 @@ def analyze_sebi_compliance(transcript: str, advisor_reg_no: str = "") -> Dict[s
     # ── Layer 1: Structural Pre-scan ─────────────────────────────────────────
     pre_score, pre_reasons, pre_rules = _run_forensic_scan(transcript)
 
-    # ── Layer 2: Gemini Pro Deep Forensic Analysis ────────────────────────────
-    if HAS_GEMINI and config.GEMINI_API_KEY:
-        try:
-            prompt = _build_forensic_prompt(transcript, advisor_reg_no, pre_score, pre_reasons)
-            raw_text = _call_gemini(prompt)
-            result_data = _extract_json(raw_text)
+    # ── Layer 1.5: TF-IDF Keyword Density Scorer ─────────────────────────────
+    tfidf_score = _compute_tfidf_score(transcript)
 
-            if result_data:
-                gemini_score = float(result_data.get("risk_score", pre_score))
-                confidence = result_data.get("confidence", "MEDIUM")
+    # Blend Layer 1 and Layer 1.5
+    offline_score = 0.70 * pre_score + 0.30 * tfidf_score
+    offline_score = min(max(round(offline_score, 4), 0.0), 1.0)
 
-                # ── Layer 3: Ensemble Calibration ─────────────────────────
-                # Weight Gemini higher when it's confident, blend with structural scan for robustness
-                if confidence == "HIGH":
-                    final_score = 0.90 * gemini_score + 0.10 * pre_score
-                elif confidence == "MEDIUM":
-                    final_score = 0.75 * gemini_score + 0.25 * pre_score
-                else:
-                    final_score = 0.60 * gemini_score + 0.40 * pre_score
+    if tfidf_score > 0.4 and "TF-IDF similarity to known scam patterns detected" not in pre_reasons:
+        pre_reasons.append(f"TF-IDF similarity to known scam patterns detected (score: {tfidf_score:.2f})")
 
-                # Unregistered or malformed advisor reg penalty
-                if advisor_reg_no and advisor_reg_no.strip():
-                    valid_fmt = bool(re.match(r"^in[ahz]\d{9}$", advisor_reg_no.strip().lower()))
-                    if not valid_fmt:
-                        final_score = min(1.0, final_score + 0.10)
-                        reasons = result_data.get("reasons", [])
-                        if not any("registration" in r.lower() for r in reasons):
-                            reasons.append(f"Invalid/malformed SEBI registration format: '{advisor_reg_no}' — valid format is INH/INA/INZ + 9 digits")
-                        result_data["reasons"] = reasons
+    # ── Advisor registration penalty ──────────────────────────────────────────
+    if advisor_reg_no and advisor_reg_no.strip():
+        valid_fmt = bool(re.match(r"^in[ahz]\d{9}$", advisor_reg_no.strip().lower()))
+        if not valid_fmt:
+            offline_score = min(1.0, offline_score + 0.10)
+            pre_reasons.append(f"Invalid/malformed SEBI registration format: '{advisor_reg_no}'")
+            pre_rules.append("SEBI IA Regulations 2013 — Reg 3")
 
-                final_score = min(1.0, round(final_score, 4))
-                is_violation = final_score >= config.SEBI_RISK_THRESHOLD
-                verdict = result_data.get("verdict", "SEBI_VIOLATION" if is_violation else "COMPLIANT")
-                if verdict == "WATCH" and is_violation:
-                    verdict = "SEBI_VIOLATION"
-                elif verdict == "WATCH" and not is_violation:
-                    pass  # keep WATCH for borderline
-
-                return {
-                    "is_violation": is_violation,
-                    "risk_score": final_score,
-                    "verdict": verdict,
-                    "confidence": confidence,
-                    "summary": result_data.get("summary", "Forensic analysis completed."),
-                    "reasons": result_data.get("reasons", pre_reasons),
-                    "sebi_rules": result_data.get("sebi_rules", pre_rules),
-                    "detected_schemes": result_data.get("detected_schemes", ["none"]),
-                    "compliance_signals": result_data.get("compliance_signals", [])
-                }
-        except Exception as e:
-            print(f"[SEBI Engine] Gemini error, using forensic rule engine: {e}")
-
-    # ── Pure Rule Engine Fallback ─────────────────────────────────────────────
-    is_violation = pre_score >= config.SEBI_RISK_THRESHOLD
+    is_violation = offline_score >= config.SEBI_RISK_THRESHOLD
     text_lower = transcript.lower()
     detected_schemes = []
     if re.search(r"\b(ponzi|pyramid|chain)\b", text_lower): detected_schemes.append("ponzi")
     if re.search(r"\b(pump|dump|operator)\b", text_lower): detected_schemes.append("pump_dump")
     if re.search(r"\b(insider|inside information)\b", text_lower): detected_schemes.append("insider_tip")
     if re.search(r"\b(telegram|whatsapp).{0,30}(vip|paid|premium)\b", text_lower): detected_schemes.append("paid_group")
+    if re.search(r"\b(front.?run|spoofing|wash\s*trad)\b", text_lower): detected_schemes.append("market_manipulation")
+    if re.search(r"\b(impersonat|on behalf of sebi|sebi officer)\b", text_lower): detected_schemes.append("impersonation")
     if not detected_schemes: detected_schemes = ["none"]
 
-    verdict_label = "SEBI_VIOLATION" if is_violation else ("WATCH" if pre_score > 0.35 else "COMPLIANT")
+    if offline_score >= 0.80:
+        confidence = "HIGH"
+    elif offline_score >= 0.50:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    verdict_label = "SEBI_VIOLATION" if is_violation else ("WATCH" if offline_score > 0.35 else "COMPLIANT")
     summary = (
-        f"SEBI Violation Detected (Forensic Score: {pre_score:.0%}) — {', '.join(detected_schemes)} scheme patterns identified."
+        f"SEBI Violation Detected (Forensic Score: {offline_score:.0%}) — {', '.join(detected_schemes)} scheme patterns identified."
         if is_violation else
-        f"Risk assessment: {pre_score:.0%}. {'Monitoring recommended.' if pre_score > 0.35 else 'Content appears compliant.'}"
+        f"Risk assessment: {offline_score:.0%}. {'Monitoring recommended.' if offline_score > 0.35 else 'Content appears compliant.'}"
     )
 
     return {
         "is_violation": is_violation,
-        "risk_score": pre_score,
+        "risk_score": offline_score,
         "verdict": verdict_label,
-        "confidence": "MEDIUM",
+        "confidence": confidence,
         "summary": summary,
         "reasons": pre_reasons or ["No explicit SEBI violation signals detected."],
         "sebi_rules": pre_rules,
