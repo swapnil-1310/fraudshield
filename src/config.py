@@ -42,3 +42,13 @@ def get_server_config() -> dict:
 
 def is_cloud_fallback_enabled() -> bool:
     return settings.get("backup_apis", {}).get("enable_cloud_fallback", False)
+
+def get_metadata_config() -> dict:
+    return settings.get("metadata", {
+        "enabled": True,
+        "use_ffprobe": True,
+        "use_exiftool": True,
+        "timeout_seconds": 10,
+        "detect_provenance": True
+    })
+

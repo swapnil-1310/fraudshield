@@ -95,3 +95,11 @@ backup_apis:
     enabled: false
     fake_score_threshold: 0.5
     models: "deepfake,genai"
+
+metadata:
+  enabled: true
+  use_ffprobe: true
+  use_exiftool: true
+  timeout_seconds: 10
+  detect_provenance: true
+

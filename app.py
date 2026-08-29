@@ -209,6 +209,13 @@ def run_pipeline(job_id: str, temp_job_dir: str, file_path: str):
                 "resolution": "Unknown",
                 "compression_flag": False
             }),
+            "metadata_forensics": ingest.get("metadata_forensics", {
+                "status": "unavailable",
+                "completeness": "low",
+                "provenance_status": "not_available",
+                "forensic_observations": ["Metadata forensics unavailable"],
+                "metadata_confidence": 0.0
+            }),
         }
 
         # Auto-generate SCORES legal complaint draft

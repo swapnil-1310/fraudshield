@@ -7,19 +7,24 @@ from moviepy import VideoFileClip
 from facenet_pytorch import MTCNN
 from PIL import Image
 
-from src.config import get_device, get_stage_config, get_threshold
+from src.config import get_device, get_stage_config, get_threshold, get_metadata_config
+from src.metadata_forensics import extract_metadata_forensics
 
 def run_stage1_ingest(video_path: str, temp_dir: str, job_id: str):
     """
-    Extracts audio and uses adaptive scene-aware face sampling to catch micro-splices.
+    Extracts audio, uses adaptive scene-aware face sampling to catch micro-splices,
+    assesses video quality, and extracts video metadata & media provenance.
     Returns:
         dict: {
             "audio_path": str or None,
-            "face_frames_paths": list[str]
+            "face_frames_paths": list[str],
+            "quality_assessment": dict,
+            "metadata_forensics": dict
         }
     """
-    print(f"[{job_id}] Running Stage 1: Ingest & Preprocess (Adaptive Sampling)")
+    print(f"[{job_id}] Running Stage 1: Ingest & Preprocess (Adaptive Sampling + Metadata Forensics)")
     stage_config = get_stage_config("stage1_ingest")
+    metadata_config = get_metadata_config()
     device = get_device()
     
     result = {
@@ -31,10 +36,35 @@ def run_stage1_ingest(video_path: str, temp_dir: str, job_id: str):
             "resolution": "Unknown",
             "duration_sec": 0.0,
             "compression_flag": False
+        },
+        "metadata_forensics": {
+            "status": "unavailable",
+            "completeness": "low",
+            "provenance_status": "not_available",
+            "forensic_observations": ["Metadata extraction pending"],
+            "metadata_confidence": 0.0
         }
     }
     
     os.makedirs(temp_dir, exist_ok=True)
+
+    # 0. Extract Video Metadata & Media Provenance (Non-blocking)
+    try:
+        print(f"[{job_id}] Extracting video container metadata & provenance credentials...")
+        meta_res = extract_metadata_forensics(video_path, job_id=job_id, config=metadata_config)
+        result["metadata_forensics"] = meta_res
+        print(f"[{job_id}] Metadata forensics completed (Status: {meta_res.get('status')}, Completeness: {meta_res.get('completeness')}, Provenance: {meta_res.get('provenance_status')}).")
+    except Exception as e:
+        print(f"[{job_id}] Metadata extraction encountered non-fatal error: {e}")
+        result["metadata_forensics"] = {
+            "status": "unavailable",
+            "reason": f"Metadata extraction failed: {str(e)}",
+            "completeness": "low",
+            "provenance_status": "not_available",
+            "forensic_observations": ["Metadata extraction could not be completed"],
+            "metadata_confidence": 0.0
+        }
+
     
     # 1. Extract Audio
     try:

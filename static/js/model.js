@@ -292,6 +292,34 @@ export function toViewModel(raw, meta = {}) {
     });
   }
 
+  const metaForensics = raw.metadata_forensics || {};
+  if (metaForensics.status === 'available' || (metaForensics.forensic_observations && metaForensics.forensic_observations.length)) {
+    const vStream = metaForensics.video_stream || {};
+    const emb = metaForensics.embedded_metadata || {};
+    const prov = metaForensics.provenance || {};
+    const obsText = (metaForensics.forensic_observations || []).join('; ');
+    push({
+      kind: 'Media Metadata & Provenance',
+      tier: metaForensics.completeness === 'high' ? 'low' : metaForensics.completeness === 'medium' ? 'low' : 'moderate',
+      stage: 'Stage 01 · ingest',
+      title: `Metadata & Provenance (${metaForensics.completeness || 'standard'} completeness)`,
+      body: `Container and stream forensic analysis completed. ${obsText}`,
+      quote: null,
+      at: null,
+      kv: [
+        emb.camera_make || emb.camera_model ? ['Device / Camera', `${emb.camera_make || ''} ${emb.camera_model || ''}`.trim()] : null,
+        emb.software_used ? ['Creation Software', emb.software_used] : null,
+        emb.encoder_software || vStream.encoder ? ['Encoder', emb.encoder_software || vStream.encoder] : null,
+        vStream.codec_name && vStream.codec_name !== 'Unknown' ? ['Video Codec', vStream.codec_name.toUpperCase()] : null,
+        vStream.resolution && vStream.resolution !== 'Unknown' ? ['Resolution', vStream.resolution] : null,
+        vStream.frame_rate ? ['Frame Rate', `${vStream.frame_rate} fps`] : null,
+        ['Metadata Completeness', (metaForensics.completeness || 'low').toUpperCase()],
+        ['Provenance / Content Credentials', metaForensics.provenance_status || 'not_available'],
+      ].filter(Boolean),
+    });
+  }
+
+
   if (sebi.prompt_injection_detected) {
     push({
       kind: 'Tampering', tier: 'critical', stage: 'Stage 05 · compliance',
@@ -448,6 +476,7 @@ export function toViewModel(raw, meta = {}) {
     extractedText: raw.extracted_text || null,
     ocrConfidence: num(raw.ocr_confidence),
     complaint: raw.scores_complaint || null,
+    metadataForensics: raw.metadata_forensics || null,
 
     raw,
   };
