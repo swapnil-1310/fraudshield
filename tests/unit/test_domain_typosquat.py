@@ -1,11 +1,10 @@
 """
 Unit tests for Levenshtein edit distance and domain typosquatting in stage9_apk_domain.py.
 """
-import pytest
 from src.stages.stage9_apk_domain import (
     _levenshtein,
-    scan_domain,
     extract_urls_from_text,
+    scan_domain,
 )
 
 

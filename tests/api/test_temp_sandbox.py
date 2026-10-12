@@ -4,10 +4,9 @@ on both pipeline success and forced unhandled failure.
 """
 import os
 import uuid
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from app import run_pipeline, jobs
+from app import jobs, run_pipeline
 
 
 def test_temp_sandbox_cleanup_on_success():

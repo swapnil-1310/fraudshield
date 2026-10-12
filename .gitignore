@@ -1,20 +1,48 @@
-# Environment & secrets
+# ==============================================================================
+# FinGuard — Git Ignore Configuration
+# ==============================================================================
+
+# Environment & Secrets (Never commit live credentials)
 .env
 *.env
+.env.*
+!.env.example
 
-# Virtual environments
+# Python Virtual Environments
 .venv/
 env/
 venv/
+ENV/
+*.venv/
 
-# Caches & temporary files
-temp/*
-!temp/.gitkeep
+# Compiled Bytecode & Caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 *.log
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Local evaluation dumps
+# Machine Learning Checkpoints & Model Weights (Download dynamically)
+*.pth
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.tflite
+
+# Ephemeral Runtime Scratchpads (Preserve directory structure)
+temp/*
+!temp/.gitkeep
+
+# Evaluation Benchmark Dumps
 tests/*.csv
 *.csv.bak
+
+# IDE, OS & System Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

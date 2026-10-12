@@ -1,8 +1,7 @@
 """
 Unit tests for configuration loading and threshold accessors in src/config.py.
 """
-import pytest
-from src.config import settings, get_threshold, get_stage_config, get_device
+from src.config import get_stage_config, get_threshold, settings
 
 
 def test_config_settings_loaded():

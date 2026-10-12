@@ -1,7 +1,6 @@
 """
 Unit tests for normalize_phonetic_financial_speech in stage4_transcription.py.
 """
-import pytest
 from src.stages.stage4_transcription import normalize_phonetic_financial_speech
 
 

@@ -1,12 +1,11 @@
 """
 Unit tests for compute_composite_score, Hinglish slang, and prompt injection in stage5_llm.py.
 """
-import pytest
 from src.stages.stage5_llm import (
+    SIGNAL_WEIGHTS,
     compute_composite_score,
     detect_hinglish_slang,
     scan_for_prompt_injection,
-    SIGNAL_WEIGHTS,
 )
 
 

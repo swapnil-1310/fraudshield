@@ -2,8 +2,10 @@
 Unit tests for SEBI registry matching logic and verdict categories in stage6_registry.py.
 Tests against the actual implementation as it behaves TODAY.
 """
-import pytest
 import re
+
+import pytest
+
 from src.stages.stage6_registry import run_stage6_registry
 
 # Actual regex used in stage6_registry.py line 74:

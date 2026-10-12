@@ -3,8 +3,7 @@ API contract tests asserting endpoints, request validation, status codes, and re
 All heavy ML stages are mocked to guarantee CPU execution with zero network and zero GPU overhead.
 """
 import io
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def test_api_health(client):
@@ -78,7 +77,7 @@ def test_invalid_file_types(client):
 
 def test_job_create_poll_and_complaint(client):
     """Mocks run_pipeline to test asynchronous job queuing, polling, and complaint download."""
-    with patch("app.run_pipeline") as mock_run:
+    with patch("app.run_pipeline"):
         fake_video = io.BytesIO(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom")
         res = client.post("/api/jobs", files={"file": ("sample.mp4", fake_video, "video/mp4")})
         assert res.status_code == 200

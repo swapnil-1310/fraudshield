@@ -3,6 +3,7 @@ Unit tests for DPDP Act 2023 PII scrubbing shield in stage5_llm.py.
 Tests positive pattern matches for all 7 PII types and negative non-PII safety.
 """
 import pytest
+
 from src.stages.stage5_llm import scrub_pii_dpdp
 
 
@@ -49,7 +50,7 @@ def test_scrub_bank_account_account_no_keyword():
 
 
 @pytest.mark.xfail(
-    reason="Known issue in stage5_llm.py regex: (?:a/c|acc(?:ount)?(?:\s+no)?[:\s]+) separates a/c from [:\s]+ without grouping, failing on 'a/c <digits>'"
+    reason=r"Known issue in stage5_llm.py regex: (?:a/c|acc(?:ount)?(?:\s+no)?[:\s]+) separates a/c from [:\s]+ without grouping, failing on 'a/c <digits>'"
 )
 def test_scrub_bank_account_spaced_a_c():
     """Fails today due to regex precedence in stage5_llm.py."""
@@ -89,6 +90,6 @@ def test_non_pii_negatives_preserved():
 def test_sebi_reg_number_not_masked_as_pan():
     """SEBI numbers like INA000012345 or INZ000012345 should not match PAN regex."""
     text = "Registered under SEBI registration number INA000012345."
-    scrubbed, count = scrub_pii_dpdp(text)
+    scrubbed, _count = scrub_pii_dpdp(text)
     assert "INA000012345" in scrubbed
     assert "[MASKED_PAN_DPDP]" not in scrubbed
