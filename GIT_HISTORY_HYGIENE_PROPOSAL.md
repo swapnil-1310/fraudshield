@@ -1,6 +1,6 @@
-# 🧹 GIT_HISTORY_HYGIENE_PROPOSAL.md — Large File History Purge Plan
-> **Status**: Proposed Plan Only (NOT EXECUTED per standing rules)  
-> **Target Problem**: Git repository size is bloated by **235+ MB** of committed video/audio datasets and media files in git history.  
+# 🧹 GIT_HISTORY_HYGIENE_PROPOSAL.md — Large File History Purge Execution Record
+> **Status**: **EXECUTED** on branch `chore/phase-1-baseline` (Backup preserved at `../fraudshield_v1_backup.git`)  
+> **Result**: Reduced `.git` size from **193.5 MB to 27.3 MB** (~86% reduction) by purging `dataset/` (1,248 files) across all historical commits.  
 
 ---
 

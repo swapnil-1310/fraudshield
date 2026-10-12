@@ -37,7 +37,8 @@ htmlcov/
 temp/*
 !temp/.gitkeep
 
-# Evaluation Benchmark Dumps
+# Evaluation Benchmark Dumps & Datasets
+dataset/
 tests/*.csv
 *.csv.bak
 
