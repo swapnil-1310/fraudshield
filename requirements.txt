@@ -1,24 +1,4 @@
-fastapi
-uvicorn
-python-multipart
-pydantic
-pyyaml
-python-dotenv
-moviepy
-facenet-pytorch
-timm
-torch
-torchvision
-torchaudio
-transformers
-librosa
-faster-whisper
-rapidfuzz
-requests
-numpy
-pillow
-opencv-python
-soundfile
-easyocr
-androguard
-python-Levenshtein
+# FinGuard — Master Production Dependencies
+# Installs base web/utility dependencies and ML/forensics pipeline components
+-r requirements-base.txt
+-r requirements-ml.txt

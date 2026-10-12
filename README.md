@@ -163,7 +163,11 @@ python -m venv .venv
 # On Linux/macOS:
 source .venv/bin/activate
 
+# Install pipeline dependencies:
 pip install -r requirements.txt
+
+# (Optional) Install development & test tools:
+pip install -r requirements-dev.txt
 ```
 
 ### 4. Run the Application
