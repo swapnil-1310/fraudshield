@@ -23,7 +23,17 @@ settings = load_config()
 
 # Helper accessors
 def get_device():
-    return "cpu" if settings.get("hardware", {}).get("force_cpu", False) else settings.get("hardware", {}).get("device", "cuda")
+    if settings.get("hardware", {}).get("force_cpu", False):
+        return "cpu"
+    dev = settings.get("hardware", {}).get("device", "cuda")
+    if dev == "cuda":
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return "cpu"
+        except Exception:
+            return "cpu"
+    return dev
 
 def get_threshold(key: str, default: float = 0.5) -> float:
     return settings.get("thresholds", {}).get(key, default)

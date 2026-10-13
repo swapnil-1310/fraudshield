@@ -62,7 +62,7 @@ pipeline:
     use_cpu: false
     
   stage4_transcription:
-    model_id: "Systran/faster-whisper-medium"
+    model_id: "Systran/faster-whisper-small"
     compute_type: "int8"
     use_cpu: true
     
