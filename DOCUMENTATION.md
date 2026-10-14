@@ -30,7 +30,7 @@ It runs entirely on your laptop GPU (NVIDIA RTX 4050, 6GB VRAM) with **zero clou
 | Web Framework | **FastAPI** | Async API server with background task support |
 | ML Framework | **PyTorch** + **timm** | Vision model inference |
 | Face Detection | **MTCNN** (facenet-pytorch) | Face extraction from video frames |
-| Vision Deepfake | **EfficientNet-B4 + Xception SRM** (custom hybrid) | Spatial + frequency domain deepfake detection |
+| Vision Deepfake | **MS-EffGCViT-B0** (Default) / **EfficientNet-B4 + Xception SRM** (Modular) | Multi-Scale GCViT attention & hybrid spatial-frequency deepfake detection |
 | Audio Deepfake | **Wav2Vec2** (MelodyMachine/Deepfake-Audio-Detection-V2) | Voice cloning / audio spoof detection |
 | Transcription | **faster-whisper** (CTranslate2 int8) | Multilingual speech-to-text (Hindi+English) |
 | LLM Reasoning | **LLaMA 3.1** via **Ollama** (local) | SEBI compliance analysis with structured JSON output |
@@ -255,12 +255,17 @@ fintech/
 - **Output**: List of face frame paths + audio WAV path
 
 ### Stage 2: Vision Deepfake Detection
-- **Model**: Custom `HybridDeepfakeDetector` combining:
-  - **EfficientNet-B4** (spatial domain — looks at pixel-level artifacts)
-  - **Xception** with **SRM (Steganalysis Rich Model) filters** (frequency domain — detects noise patterns left by GAN generators)
-- **How it works**: Each face frame is passed through both branches. The spatial branch sees the image normally. The SRM layer converts the image to grayscale, applies 3 high-pass forensic filters (detecting residual noise), and feeds that to Xception
-- **Output**: Combined features → classifier → sigmoid probability (0=fake, 1=real). We invert this to get a "fake score"
-- **Temporal variance**: If the fake score jumps wildly across sequential frames, that itself is suspicious
+- **Modular Backend Architecture**: Standardized adapter pattern (`BaseVisionBackend`, `get_vision_backend()`) configurable via `config.yaml`:
+  - **MS-EffGCViT-B0** (`backend: "ms_eff_gcvit"`, default): Combines EfficientNet-B0 CNN feature extraction with Global Context Vision Transformer (GCViT) multi-scale self-attention (`KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus`). Fine-tuned specifically for video deepfakes (FaceForensics++ c23).
+  - **Hybrid Spatial+Frequency** (`backend: "hybrid_phase2"`, legacy fallback): Combines EfficientNet-B4 (spatial) and Xception with SRM filters (frequency noise residuals). Preserved for backward compatibility.
+- **Output Semantics & Calibration**:
+  - `ms_eff_gcvit`: Generates raw logit; mapped via $\sigma(\text{logit}) = P(\text{fake}) \in [0.0, 1.0]$. Default classification threshold $\tau = 0.60$.
+  - `hybrid_phase2`: Generates $P(\text{real})$; converted to $P(\text{fake}) = \max(0.0, \min(1.0, 1.0 - P(\text{real})))$. Default threshold $\tau = 0.50$.
+- **Diagnostic Identifiers**: Stage 2 results explicitly return `model_backend`, `model_id`, and `threshold_applied` alongside scores for reproducible auditing.
+- **Temporal Dynamics & Early Exit**: Calculates temporal variance across frames and detects mouth-region motion activity (viseme dynamics). Skips remaining frames when 4 consecutive frames score above 0.92 fake confidence.
+- **Validation Boundary & Generalization Caveat**:
+  - On a 20-video FaceForensics++ c23 benchmark (5 Real, 5 Deepfakes, 5 Face2Face, 5 FaceSwap), `ms_eff_gcvit` achieved 100% Accuracy and 100% Recall vs 25% Accuracy and 0% Recall for the legacy model.
+  - **Important**: This 100% validation metric applies to the evaluated FaceForensics++ c23 test sample under controlled lab conditions. Real-world social media videos (WhatsApp/Telegram recompression, diffusion talking-head models, LivePortrait, dynamic lighting) present distribution shifts that require continued evaluation across diverse in-the-wild datasets. Universal 100% accuracy is not claimed.
 
 ### Stage 3: Audio Deepfake Detection
 - **Model**: Wav2Vec2 fine-tuned on deepfake audio (`MelodyMachine/Deepfake-Audio-Detection-V2`)

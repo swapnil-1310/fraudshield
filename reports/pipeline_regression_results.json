@@ -1,0 +1,136 @@
+{
+  "ms_eff_gcvit": [
+    {
+      "video": "183.mp4",
+      "backend": "ms_eff_gcvit",
+      "model_id": "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus",
+      "threshold_applied": 0.6,
+      "score": 0.06131884828209877,
+      "peak_score": 0.08643657714128494,
+      "label": 0,
+      "prediction": 0,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 8.908615112304688
+    },
+    {
+      "video": "469.mp4",
+      "backend": "ms_eff_gcvit",
+      "model_id": "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus",
+      "threshold_applied": 0.6,
+      "score": 0.3864012117187182,
+      "peak_score": 0.5659658908843994,
+      "label": 0,
+      "prediction": 0,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 5.147881269454956
+    },
+    {
+      "video": "183_253.mp4",
+      "backend": "ms_eff_gcvit",
+      "model_id": "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus",
+      "threshold_applied": 0.6,
+      "score": 0.998363196849823,
+      "peak_score": 0.998363196849823,
+      "label": 1,
+      "prediction": 1,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 7.1362833976745605
+    },
+    {
+      "video": "469_481.mp4",
+      "backend": "ms_eff_gcvit",
+      "model_id": "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus",
+      "threshold_applied": 0.6,
+      "score": 0.999096155166626,
+      "peak_score": 0.999096155166626,
+      "label": 1,
+      "prediction": 1,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 4.215944290161133
+    },
+    {
+      "video": "481_469.mp4",
+      "backend": "ms_eff_gcvit",
+      "model_id": "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus",
+      "threshold_applied": 0.6,
+      "score": 0.9991594552993774,
+      "peak_score": 0.9991594552993774,
+      "label": 1,
+      "prediction": 1,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 6.884304046630859
+    }
+  ],
+  "hybrid_phase2": [
+    {
+      "video": "183.mp4",
+      "backend": "hybrid_phase2",
+      "model_id": "AdityaManojShinde/deepfake-detector",
+      "threshold_applied": 0.5,
+      "score": 0.009600258866945901,
+      "peak_score": 0.014010906219482422,
+      "label": 0,
+      "prediction": 0,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 10.304750919342041
+    },
+    {
+      "video": "469.mp4",
+      "backend": "hybrid_phase2",
+      "model_id": "AdityaManojShinde/deepfake-detector",
+      "threshold_applied": 0.5,
+      "score": 0.01962700585524241,
+      "peak_score": 0.03440272808074951,
+      "label": 0,
+      "prediction": 0,
+      "correct": true,
+      "frames_analyzed": 15,
+      "latency_sec": 6.825048923492432
+    },
+    {
+      "video": "183_253.mp4",
+      "backend": "hybrid_phase2",
+      "model_id": "AdityaManojShinde/deepfake-detector",
+      "threshold_applied": 0.5,
+      "score": 0.007574503620465597,
+      "peak_score": 0.010635137557983398,
+      "label": 1,
+      "prediction": 0,
+      "correct": false,
+      "frames_analyzed": 15,
+      "latency_sec": 9.974733591079712
+    },
+    {
+      "video": "469_481.mp4",
+      "backend": "hybrid_phase2",
+      "model_id": "AdityaManojShinde/deepfake-detector",
+      "threshold_applied": 0.5,
+      "score": 0.004492205381393433,
+      "peak_score": 0.006800591945648193,
+      "label": 1,
+      "prediction": 0,
+      "correct": false,
+      "frames_analyzed": 15,
+      "latency_sec": 6.232985734939575
+    },
+    {
+      "video": "481_469.mp4",
+      "backend": "hybrid_phase2",
+      "model_id": "AdityaManojShinde/deepfake-detector",
+      "threshold_applied": 0.5,
+      "score": 0.0002816577752431234,
+      "peak_score": 0.00045365095138549805,
+      "label": 1,
+      "prediction": 0,
+      "correct": false,
+      "frames_analyzed": 15,
+      "latency_sec": 9.797809839248657
+    }
+  ]
+}

@@ -35,6 +35,15 @@ def get_device():
             return "cpu"
     return dev
 
+def get_vision_detector_config() -> dict:
+    return settings.get("vision_detector", {})
+
+def get_vision_threshold() -> float:
+    det_cfg = get_vision_detector_config()
+    if "threshold" in det_cfg and det_cfg["threshold"] is not None:
+        return float(det_cfg["threshold"])
+    return get_threshold("vision_fake_threshold", 0.5)
+
 def get_threshold(key: str, default: float = 0.5) -> float:
     return settings.get("thresholds", {}).get(key, default)
 

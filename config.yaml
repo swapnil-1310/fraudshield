@@ -24,6 +24,13 @@ thresholds:
   # APK / domain scanner
   apk_domain_levenshtein_max_dist: 3
 
+vision_detector:
+  # Supported backends:
+  #   - "hybrid_phase2": Legacy spatial-frequency detector (EfficientNet-B4 + SRM Xception)
+  #   - "ms_eff_gcvit": Multi-Scale Efficient GCViT (EfficientNet-B0 + GCViT attention, FaceForensics++ c23)
+  backend: "ms_eff_gcvit"
+  threshold: 0.60
+
 vision:
   # Early-exit: if this many leading frames all score above early_exit_score, skip remaining frames
   early_exit_frame_count: 4

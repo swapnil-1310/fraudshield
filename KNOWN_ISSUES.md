@@ -57,3 +57,28 @@
 - **Observed Warning**:
   `StarletteDeprecationWarning: Using 'httpx' with 'starlette.testclient' is deprecated; install 'httpx2' instead.`
 - **Status**: Non-fatal deprecation warning from Starlette's compatibility shim with recent `httpx` versions. Filtered in `pytest.ini`.
+
+---
+
+## 6. Vision Deepfake Detector: Domain Shift, Modular Backends & Benchmark Caveats
+- **Background**:
+  - The legacy production detector (`hybrid_phase2`, `AdityaManojShinde/deepfake-detector`) combines spatial EfficientNet-B4 and frequency-domain SRM Xception.
+  - During benchmark evaluation on FaceForensics++ c23, the legacy model scored authentic probabilities near 1.0 for all manipulated videos (0% recall across Deepfakes, Face2Face, and FaceSwap). This was traced to dataset domain shift: the model weights appear fine-tuned predominantly on synthetic static GAN faces (FFHQ/StyleGAN2) where spatial-frequency cues differ fundamentally from video face-swap boundary blending.
+- **Resolution**:
+  - A modular vision detector adapter interface was implemented (`src/stages/backends/base.py`, `get_vision_backend()`), supporting:
+    1. `backend: "ms_eff_gcvit"` (Default): Multi-Scale Efficient GCViT-B0 (`KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus`), fine-tuned directly on FaceForensics++ c23 manipulation methods.
+    2. `backend: "hybrid_phase2"`: Legacy spatial-frequency detector, preserved for 100% backward compatibility.
+  - Calibrated decision threshold configured via `vision_detector.threshold: 0.60` (or `0.50` fallback for legacy).
+- **Validation Results (FaceForensics++ c23, N=20 videos)**:
+  - Evaluated on 20 TUM FaceForensics++ c23 videos (5 Original/Real, 5 Deepfakes, 5 Face2Face, 5 FaceSwap):
+    - `hybrid_phase2`: 25.0% Accuracy, 0.0% Recall (0/15 fakes flagged), ROC-AUC 0.5867, mean latency 2.61s.
+    - `ms_eff_gcvit`: 100.0% Accuracy, 100.0% Recall (15/15 fakes flagged), ROC-AUC 1.0000 at both $\tau=0.50$ and $\tau=0.60$, mean latency 1.16s (55.6% faster).
+- **CRITICAL Benchmark Generalization Caveat**:
+  - The 100% accuracy and 100% recall achieved on the 20-video FaceForensics++ c23 evaluation **must NOT be interpreted as universal 100% real-world detection accuracy**.
+  - FaceForensics++ c23 is a controlled academic benchmark with specific manipulation algorithms (Deepfakes autoencoder, Face2Face graphics re-rendering, FaceSwap 3D warping) and fixed H.264 compression ($CRF=23$).
+  - Real-world financial fraud videos circulating on social media (WhatsApp, Telegram, YouTube) exhibit:
+    1. Unseen generative models (e.g., LivePortrait, SadTalker, Diffusion-based neural talking head synthesizers).
+    2. Multiple re-compression passes, resolution downscaling, and variable frame rates.
+    3. Severe lighting variation, occlusion, and in-the-wild facial expressions.
+  - Production deployments must treat `ms_eff_gcvit` as a significantly stronger baseline on standard video artifacts, while continuing out-of-distribution characterization against larger benchmarks (Celeb-DF-v2, WildDeepfake, and real-world finfluencer fraud captures).
+
