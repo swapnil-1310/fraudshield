@@ -31,18 +31,17 @@ FinGuard is an **offline-first, multi-modal AI forensic platform** that analyzes
 | **ASGI Server** | **Uvicorn** | Standard | ASGI worker serving HTTP/REST traffic on port `8000`. |
 | **Configuration** | **PyYAML + Pydantic** | Standard | Typed configuration loader with environment variable overrides (`config.yaml`). |
 | **Deep Learning Framework** | **PyTorch** (`torch`, `torchvision`, `torchaudio`) | `>=2.1.0` (CUDA 11.8/12.1 or CPU) | Neural network inference engine for vision and acoustic forensic models. |
-| **Vision Backbone** | **timm** (PyTorch Image Models) | `>=0.9.0` | Supplies `efficientnet_b4` (spatial) and `xception` (SRM frequency) backbones. |
+| **Vision Backbone** | **MS-EffGCViT-B0** | `KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus` | Spatial-frequency deepfake classifier loaded from HuggingFace. |
 | **Face Detection & Alignment** | **facenet-pytorch (MTCNN)** | Standard | Extracts bounding boxes and crops facial regions with a 25px margin. |
-| **Custom Vision Forensic Model** | **HybridDeepfakeDetector** | `deepfake_detector_phase2.pth` | Dual-branch spatial + SRM noise-residual hybrid neural network (3840-dim concatenated feature embedding). |
-| **Noise Steganalysis Layer** | **SRMLayer** (Custom PyTorch `nn.Module`) | 3 fixed 5×5 high-pass filters | Extracts high-frequency forensic noise residuals from grayscale face images. |
-| **Audio Deepfake Detection** | **HuggingFace Transformers (Wav2Vec2)** | `MelodyMachine/Deepfake-Audio-Detection-V2` | Acoustic spoofing classifier evaluated across 5-second windowed chunks. |
-| **Multilingual Transcription** | **faster-whisper** (CTranslate2) | `Systran/faster-whisper-medium` (`int8`) | Hindi-English code-switched ASR. Runs on CPU to prevent VRAM contention. |
+| **Custom Vision Forensic Model** | **MS-EffGCViT Backend** | Pretrained Hub checkpoint | Multi-scale EfficientNet + Global Context Vision Transformer architecture. |
+| **Audio Deepfake Detection** | **HuggingFace Transformers (Wav2Vec2)** | `garystafford/wav2vec2-deepfake-voice-detector` (Model C) | Production default acoustic spoofing classifier evaluated across 5-second windowed chunks. |
+| **Multilingual Transcription** | **faster-whisper** (CTranslate2) | `Systran/faster-whisper-small` (`float16` CUDA) | Hindi-English code-switched ASR on CUDA with seamless int8 CPU fallback. |
 | **Local LLM Engine** | **Ollama (LLaMA 3.1)** | `llama3.1:latest` (`8B`) | Structured JSON extraction, 6-signal SEBI compliance evaluation, and reasoning. |
 | **Fuzzy Matching & String Distances** | **RapidFuzz** + **python-Levenshtein** | Standard | Token-sort ratio matching against SEBI registry; Levenshtein distance for domain typo-squatting. |
 | **Optical Character Recognition (OCR)** | **EasyOCR** | `[en, hi]` | Multi-lingual text extraction from P&L screenshots, fake certificates, and charts. |
 | **Android APK Forensics** | **Androguard** | Standard | Static APK analysis: extracts AndroidManifest.xml permissions and package names. |
-| **Media Processing** | **MoviePy** + **OpenCV** (`cv2`) + **librosa** + **soundfile** | Standard | Video ingestion, scene-cut frame differencing, audio track stripping, normalization, and Grad-CAM/SRM heatmap generation. |
-| **Frontend Web Dashboard** | **Vanilla HTML5 + CSS + JavaScript** | ES6+ | Glassmorphic dark-theme SPA with interactive timeline risk scrubber, risk meters, and SCORES complaint viewer. |
+| **Media Processing** | **MoviePy** + **OpenCV** (`cv2`) + **librosa** + **soundfile** | Standard | Video ingestion, scene-cut frame differencing, audio track stripping, and normalization. |
+| **Frontend Web Dashboard** | **Vanilla HTML5 + CSS + JavaScript** | ES6+ | Clean Fintech SPA with decoupled Audio and Scam check sections, meters, and SCORES complaint viewer. |
 | **Browser Sentinel Extension** | **Chrome Extension Manifest V3** | Manifest v3 | Context menu scanner, page text/image right-click analysis, and slide-in notifications. |
 | **Cloud Fallback (Optional)** | **Sightengine REST API** | Optional | Config-toggled fallback if local vision models are bypassed. |
 

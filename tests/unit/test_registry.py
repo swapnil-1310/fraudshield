@@ -79,5 +79,34 @@ def test_registry_name_number_mismatch():
     }
     res = run_stage6_registry(payload, job_id="test-mismatch")
     assert res["verdict"] == "name-number mismatch"
-    # In stage6_registry.py:110, matched_entity is not populated on mismatch
+    assert res["match_status"] == "uncertain"
+    # In stage6_registry.py, matched_entity is not populated on mismatch
     assert res["matched_entity"] is None
+    assert res["is_conclusive_fraud"] is False
+
+
+def test_registry_uncertain_name_match():
+    """Claimed name is close but not exact to an entity in the registry (score between 65 and 80)."""
+    payload = {
+        "claimed_advisor_name": "Zerodha Financial Broking",
+        "claimed_registration_number": None,
+    }
+    res = run_stage6_registry(payload, job_id="test-uncertain-name")
+    assert res["verdict"] == "uncertain match"
+    assert res["match_status"] == "uncertain"
+    assert res["matched_entity"] is not None
+    assert res["is_conclusive_fraud"] is False
+    assert "Cross-verification on official sebi.gov.in is recommended" in res["explanation"]
+
+
+def test_registry_absent_never_proves_conclusive_fraud():
+    """Absent registry records alone must NEVER set is_conclusive_fraud=True."""
+    payload = {
+        "claimed_advisor_name": "Unknown Ghost Finfluencer",
+        "claimed_registration_number": "INA999888777",
+    }
+    res = run_stage6_registry(payload, job_id="test-absent-fraud-flag")
+    assert res["verdict"] == "not found"
+    assert res["match_status"] == "absent"
+    assert res["is_conclusive_fraud"] is False
+    assert "Absence alone is not conclusive proof of fraud" in res["explanation"]

@@ -82,3 +82,17 @@
     3. Severe lighting variation, occlusion, and in-the-wild facial expressions.
   - Production deployments must treat `ms_eff_gcvit` as a significantly stronger baseline on standard video artifacts, while continuing out-of-distribution characterization against larger benchmarks (Celeb-DF-v2, WildDeepfake, and real-world finfluencer fraud captures).
 
+---
+
+## 7. Video Detector A/B Evaluation: Pretrained vs Fine-Tuned Checkpoints
+- **Issue**:
+  - Investigation of a false negative on a Gemini-generated face-swap video (`gemini_faceswap_eval.mp4`) revealed that the FaceForensics++ c23 fine-tuned checkpoint (`best_checkpoint_weights.pth`) scored only 21.3% (predicting authentic), while the original pretrained model (`KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus`, `model.safetensors`) scored 98.8%.
+  - Root cause analysis confirmed that exclusive fine-tuning on older autoencoder face-swaps with strong regularization caused negative logit saturation on modern diffusion blending artifacts.
+- **Controlled A/B Evaluation (N=20 Videos, Fixed Threshold $\tau=0.60$)**:
+  - **Model A (Fine-Tuned Checkpoint)**: Accuracy 80.0%, Recall 70.0%, Precision 87.5%, Specificity 90.0%, F1 0.7778, ROC-AUC 0.8850 (TP=7, TN=9, FP=1, FN=3). Failed Gemini clip (21.3%).
+  - **Model B (Original Pretrained SafeTensors)**: Accuracy 85.0%, Recall 80.0%, Precision 88.9%, Specificity 90.0%, F1 0.8421, ROC-AUC 0.9450 (TP=8, TN=9, FP=1, FN=2). Successfully detected Gemini clip (98.8%).
+- **Current Active Configuration**:
+  - `config.yaml` is configured with `vision_detector.model_weights_file: null`, ensuring production directly and exclusively loads the original pretrained Hugging Face weights (`KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus`).
+  - The fine-tuned checkpoint `experiments/deepfake_finetune/checkpoints/best_checkpoint_weights.pth` is retained in the repository as an experimental baseline.
+  - Rollback is 100% reversible by setting `model_weights_file: experiments/deepfake_finetune/checkpoints/best_checkpoint_weights.pth` in `config.yaml`.
+

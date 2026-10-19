@@ -125,3 +125,48 @@ def test_stage2_vision_diagnostic_result_fields(tmp_path):
     assert "max_score" in res
     assert "avg_score" in res
     assert 0.0 <= res["max_score"] <= 1.0
+    assert "checkpoint_source" in res
+    assert "is_finetuned" in res
+    assert res["is_finetuned"] is False
+    assert "Original Pretrained Hugging Face" in res["checkpoint_source"]
+
+
+def test_production_backend_loads_pretrained_weights_not_finetuned():
+    """Verifies that the default production backend loads pretrained safetensors, not the fine-tuned checkpoint."""
+    backend = get_vision_backend(device="cpu")
+    try:
+        assert backend.backend_name == "ms_eff_gcvit"
+        assert "KoreaPeter" in backend.model_id
+        assert backend.is_finetuned is False
+        assert "Original Pretrained Hugging Face" in backend.checkpoint_source
+        assert backend.weights_path.endswith(".safetensors")
+    finally:
+        backend.close()
+
+
+def test_fine_tuned_weights_explicit_loading_and_reversibility():
+    """Verifies that the fine-tuned checkpoint can be loaded when explicitly configured, and safely reversed."""
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ft_weights = os.path.join(app_root, "experiments", "deepfake_finetune", "checkpoints", "best_checkpoint_weights.pth")
+
+    if os.path.isfile(ft_weights):
+        # 1. Test explicit configuration of fine-tuned checkpoint
+        with patch("src.stages.backends.get_vision_detector_config", return_value={"backend": "ms_eff_gcvit", "model_weights_file": ft_weights}):
+            ft_backend = get_vision_backend(device="cpu")
+            try:
+                assert ft_backend.is_finetuned is True
+                assert "Local Fine-Tuned Checkpoint" in ft_backend.checkpoint_source
+                assert os.path.samefile(ft_backend.weights_path, ft_weights)
+            finally:
+                ft_backend.close()
+
+    # 2. Test rollback / reversion to pretrained model (model_weights_file: None)
+    with patch("src.stages.backends.get_vision_detector_config", return_value={"backend": "ms_eff_gcvit", "model_weights_file": None}):
+        pre_backend = get_vision_backend(device="cpu")
+        try:
+            assert pre_backend.is_finetuned is False
+            assert "Original Pretrained Hugging Face" in pre_backend.checkpoint_source
+            assert pre_backend.weights_path.endswith(".safetensors")
+        finally:
+            pre_backend.close()
+

@@ -133,6 +133,11 @@ def run_stage2_vision(face_frames_paths: list, job_id: str):
         backend = get_vision_backend(backend_name=backend_name, device=device)
         result["model_backend"] = backend.backend_name
         result["model_id"] = backend.model_id
+        result["weights_path"] = getattr(backend, "weights_path", None)
+        result["is_finetuned"] = getattr(backend, "is_finetuned", False)
+        result["checkpoint_source"] = getattr(backend, "checkpoint_source", backend.model_id)
+
+        print(f"[{job_id}] Initialized Vision Backend '{backend.backend_name}'. Checkpoint: {result['checkpoint_source']}, Fine-Tuned: {result['is_finetuned']}, Threshold: {threshold:.2f} (higher=fake)")
 
         scores = []
         best_frame = None
@@ -167,17 +172,49 @@ def run_stage2_vision(face_frames_paths: list, job_id: str):
             k = min(3, len(scores_sorted))
             top_k_mean = float(np.mean(scores_sorted[:k]))
             anti_weight = round(1.0 - consensus_weight, 4)
-            # Temporal consensus smoothing; bypassed on early-exit (use raw peak instead)
+            median_score = float(np.median(scores))
+            high_ratio = sum(1 for s in scores if s >= threshold) / len(scores)
+
+            # Temporal consensus aggregation with interpretable anomaly gating
             if early_exit_triggered:
                 consensus_score = float(max_s)
+                aggregation_mode = "early_exit"
+            elif len(scores) >= consensus_min_frames:
+                peak = float(scores_sorted[0])
+                s2 = float(scores_sorted[1]) if len(scores_sorted) > 1 else peak
+                # Isolated Outlier Spike: a single frame anomaly (e.g. camera flash, glare, rapid cut)
+                # where peak is elevated (>=0.40) but drops sharply to a clean frame 2 (peak - s2 >= 0.30, s2 < 0.20, median < 0.10).
+                # Rather than crushing multi-frame evidence with median, only single-frame outliers are attenuated.
+                if peak >= 0.40 and (peak - s2 >= 0.30) and s2 < 0.20 and median_score < 0.10:
+                    consensus_score = float(0.35 * peak + 0.65 * s2)
+                    aggregation_mode = "isolated_outlier_attenuation"
+                else:
+                    # Sustained multi-frame consensus: combines top-k cluster and peak
+                    # without artificial median suppression that crushes subtle generative face-swaps.
+                    consensus_score = float(consensus_weight * top_k_mean + anti_weight * max_s)
+                    aggregation_mode = "sustained_consensus"
             else:
-                consensus_score = float(consensus_weight * top_k_mean + anti_weight * max_s) if len(scores) >= consensus_min_frames else float(max_s)
+                consensus_score = float(max_s)
+                aggregation_mode = "peak_fallback"
 
             result["avg_score"] = float(np.mean(scores))
             result["max_score"] = consensus_score
             result["raw_peak_score"] = float(max_s)
             result["peak_frame"] = best_frame
             result["temporal_variance"] = float(np.var(scores))
+            result["frame_scores"] = [float(round(s, 4)) for s in scores]
+            result["top_k_mean"] = float(round(top_k_mean, 4))
+            result["median_score"] = float(round(median_score, 4))
+            result["aggregation_mode"] = aggregation_mode
+            result["aggregation_details"] = {
+                "mode": aggregation_mode,
+                "peak": float(round(max_s, 4)),
+                "top_k_mean": float(round(top_k_mean, 4)),
+                "median": float(round(median_score, 4)),
+                "high_ratio": float(round(high_ratio, 4)),
+                "early_exit_triggered": early_exit_triggered,
+                "frames_evaluated": len(scores)
+            }
 
             # Generate Explainability Saliency Heatmap for the most suspicious frame
             if best_frame and os.path.exists(best_frame):

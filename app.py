@@ -9,16 +9,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
-import shutil, os, uuid
+import shutil, os, uuid, re
+import numpy as np
 
-from src.config import settings, get_threshold
+from src.config import settings, get_threshold, get_vision_threshold
 from src.stages.stage1_ingest import run_stage1_ingest
 from src.stages.stage2_vision import run_stage2_vision
 from src.stages.stage3_audio import run_stage3_audio
 from src.stages.stage4_transcription import run_stage4_transcription
 from src.stages.stage5_llm import run_stage5_llm
 from src.stages.stage6_registry import run_stage6_registry
-from src.stages.stage7_ocr import run_stage7_ocr
+from src.stages.stage7_ocr import run_stage7_ocr, run_video_keyframes_ocr
 from src.stages.stage8_report import generate_sebi_scores_complaint
 from src.stages.stage9_apk_domain import run_stage9_apk_domain, scan_domain
 
@@ -50,24 +51,179 @@ def validate_file_size(file: UploadFile):
     if hasattr(file, "size") and file.size and file.size > MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail=f"File exceeds maximum allowed size ({MAX_UPLOAD_SIZE // (1024*1024)}MB)")
 
-def calculate_calibrated_verdict(is_deepfake: bool, is_scam: bool, composite_risk: float, registry_verdict: str) -> str:
+def calculate_calibrated_verdict(
+    is_deepfake: bool,
+    is_scam: bool,
+    composite_risk: float,
+    registry_verdict: str,
+    fallback_used: bool = False,
+    degraded_modules: Optional[list] = None
+) -> str:
     """
     3-Tier regulatory calibration:
     - Critical: Deepfake + Scam
-    - Warning: Deepfake or Hard Scam Violation / Fake Registry
-    - Suspicious: Review Recommended (0.35 - 0.65 composite ambiguity band)
-    - Safe: Clean content (<0.35 risk)
+    - Warning: Deepfake or Hard Scam Violation / Active impersonation
+    - Suspicious: Review Recommended (ambiguous registry, composite risk >= 0.35, degraded/fallback)
+    - Safe: Clean content (<0.35 risk, full analysis completed)
+
+    Registry signal policy:
+    - "verified": no penalty (legitimate adviser confirmed).
+    - "not found" / "malformed number": registry absence alone is NOT conclusive fraud;
+      routes to Suspicious so a human reviews it — escalates to Warning only when
+      independent scam evidence (is_scam=True) is also present.
+    - "name-number mismatch": registration number belongs to a different entity —
+      this is an active impersonation signal and always produces at least Warning.
+    - "not claimed": no registry claim was made; no registry penalty applied.
     """
     if is_deepfake and is_scam:
         return "Critical: Deepfake + Scam"
     elif is_deepfake:
         return "Warning: Deepfake Detected"
-    elif is_scam or registry_verdict in ["not found", "name-number mismatch", "malformed number"]:
+    elif is_scam:
+        # Confirmed financial scam content — always at least Warning regardless of registry.
         return "Warning: SEBI Violation / Scam"
-    elif composite_risk >= 0.35:
+    elif registry_verdict == "name-number mismatch":
+        # Active impersonation: a real registration number is being claimed under a different name.
+        return "Warning: SEBI Violation / Scam"
+    elif registry_verdict in ("not found", "malformed number", "uncertain match"):
+        # Absent or unverifiable registration — suspicious but not conclusive without scam evidence.
+        return "Suspicious: Review Recommended"
+    elif composite_risk >= 0.35 or fallback_used or bool(degraded_modules):
         return "Suspicious: Review Recommended"
     else:
         return "Safe"
+
+def build_evidence_breakdown(
+    is_deepfake: bool,
+    is_scam: bool,
+    composite_risk: float,
+    registry_check: dict,
+    sebi_analysis: dict,
+    audio_score: float = 0.0,
+    vision_score: float = 0.0,
+    domain_scan: Optional[dict] = None,
+    degraded_modules: Optional[list] = None
+) -> dict:
+    """
+    Synthesizes and explains all contributing signals across media authenticity,
+    transcript NLP, registry matching, and network/domain scans.
+    Explicitly tracks missing or degraded modules so analysis failures are never counted as safe.
+    """
+    signals = []
+    vision_thresh = get_vision_threshold()
+    audio_thresh = get_threshold("audio_fake_threshold", 0.5)
+
+    if vision_score is not None and vision_score > vision_thresh:
+        signals.append(f"Visual synthetic/deepfake artifacts detected (score: {vision_score:.2f})")
+    if audio_score is not None and audio_score > audio_thresh:
+        signals.append(f"Synthetic voice/audio spoofing detected (score: {audio_score:.2f})")
+
+    if sebi_analysis:
+        intent = sebi_analysis.get("content_intent")
+        if intent == "awareness_warning":
+            signals.append("Financial scam awareness / education context detected (speaker warning against fraudulent schemes)")
+        elif intent == "ambiguous":
+            signals.append("Ambiguous financial discussion with unverified claims (human review recommended)")
+
+        if sebi_analysis.get("specific_return_promises"):
+            signals.append(f"Guaranteed/unrealistic return promises: {sebi_analysis['specific_return_promises']}")
+        if sebi_analysis.get("urgency_scarcity_language"):
+            signals.append(f"Pressure tactics / urgency demands: {sebi_analysis['urgency_scarcity_language']}")
+        if sebi_analysis.get("fee_or_transfer_requests"):
+            signals.append(f"Suspicious fund transfer / fee requests: {sebi_analysis['fee_or_transfer_requests']}")
+        if sebi_analysis.get("credential_or_otp_requests"):
+            signals.append(f"Credential / OTP / remote access requests: {sebi_analysis['credential_or_otp_requests']}")
+        if sebi_analysis.get("unsupported_regulatory_claims"):
+            signals.append(f"Unsupported regulatory claims / impersonation: {sebi_analysis['unsupported_regulatory_claims']}")
+        if sebi_analysis.get("paywall_push"):
+            signals.append(f"Unregistered paywall / VIP group push: {sebi_analysis['paywall_push']}")
+        if sebi_analysis.get("hinglish_slang_detected"):
+            signals.append(f"Indian financial scam slang detected: {sebi_analysis['hinglish_slang_detected']}")
+        if sebi_analysis.get("prompt_injection_detected"):
+            signals.append("Adversarial prompt injection attempt detected")
+
+    if registry_check:
+        reg_verdict = registry_check.get("verdict", "not claimed")
+        reg_explanation = registry_check.get("explanation", "")
+        if reg_verdict in ["malformed number", "name-number mismatch"]:
+            signals.append(f"SEBI registry violation ({reg_verdict}): {reg_explanation}")
+        elif reg_verdict == "uncertain match":
+            signals.append(f"SEBI registry match inconclusive ({reg_verdict}): {reg_explanation}")
+        elif reg_verdict == "not found" and sebi_analysis and sebi_analysis.get("claimed_registration_number"):
+            signals.append(f"SEBI registration number absent from local registry: {reg_explanation}")
+
+    if domain_scan and domain_scan.get("is_phishing"):
+        signals.append(f"Phishing/malicious domain detected: {domain_scan.get('domain', '')} ({domain_scan.get('reason', '')})")
+
+    degraded_list = list(degraded_modules or [])
+    if sebi_analysis and sebi_analysis.get("fallback_used"):
+        status = sebi_analysis.get("analysis_status", "fallback")
+        degraded_list.append(f"Stage 5 LLM offline/degraded ({status})")
+
+    return {
+        "contributing_signals": signals,
+        "degraded_or_missing_modules": degraded_list,
+        "media_authenticity": {
+            "is_deepfake": is_deepfake,
+            "vision_score": vision_score,
+            "audio_score": audio_score,
+            "assessment": "Synthetic media detected" if is_deepfake else "No synthetic manipulation detected"
+        },
+        "financial_fraud": {
+            "is_scam": is_scam,
+            "composite_risk_score": composite_risk,
+            "assessment": (
+                "Financial scam / regulatory violation detected" if is_scam
+                else ("Suspicious: Review recommended" if composite_risk >= 0.35 or bool(degraded_list)
+                      else "No financial fraud detected")
+            )
+        }
+    }
+
+def build_overall_verdict_summary(
+    verdict: str,
+    is_deepfake: bool,
+    is_scam: bool,
+    vision_score: Optional[float],
+    audio_score: Optional[float],
+    composite_risk: float,
+    sebi_analysis: dict,
+    registry_check: dict,
+    degraded_modules: Optional[list] = None
+) -> str:
+    """
+    Produces a unified, coherent explanation that aligns the risk tier,
+    media authenticity verdict, and financial compliance findings without contradiction.
+    """
+    media_findings = []
+    if vision_score is not None and vision_score > get_vision_threshold():
+        media_findings.append(f"visual facial deepfake artifacts (score: {vision_score:.2f})")
+    if audio_score is not None and audio_score > get_threshold("audio_fake_threshold", 0.5):
+        media_findings.append(f"synthetic voice cloning (score: {audio_score:.2f})")
+
+    raw_reasoning = str(sebi_analysis.get("reasoning", "")).strip()
+    clean_reasoning = re.sub(r"\[HEURISTIC FALLBACK:[^\]]*\]\s*", "", raw_reasoning).strip()
+    clean_reasoning = re.sub(r"\[REVIEW REQUIRED\]\s*", "", clean_reasoning).strip()
+
+    if is_deepfake and is_scam:
+        media_desc = ", ".join(media_findings) if media_findings else "synthetic media"
+        return f"Critical risk: Synthetic media detected ({media_desc}) alongside fraudulent financial solicitations. {clean_reasoning}"
+    elif is_deepfake:
+        media_desc = ", ".join(media_findings) if media_findings else "synthetic media artifacts"
+        content_desc = clean_reasoning if clean_reasoning else "No high-risk SEBI violations or scam solicitations flagged in spoken content."
+        return f"Synthetic media detected by forensic detectors ({media_desc}). Spoken and textual content was assessed as non-fraudulent: {content_desc}"
+    elif is_scam:
+        return f"Financial scam / SEBI regulatory violation flagged. Media streams showed no synthetic manipulation. {clean_reasoning}"
+    elif degraded_modules:
+        degraded_str = ", ".join(degraded_modules)
+        return f"Suspicious / human review recommended: One or more analysis modules operated in degraded or fallback mode ({degraded_str}). {clean_reasoning}"
+    elif composite_risk >= 0.35:
+        return f"Suspicious / human review recommended: Content exhibits ambiguous or unverified financial claims. {clean_reasoning}"
+    elif registry_check.get("verdict") in ("not found", "malformed number", "uncertain match") and registry_check.get("is_conclusive_fraud") is False:
+        return f"Review recommended: Claimed advisor credentials require human verification against the SEBI registry. {clean_reasoning}"
+    else:
+        return clean_reasoning or "Content and media verified within normal parameters. No synthetic manipulation or regulatory violations detected."
+
 
 def build_timeline_risk_track(audio_segments: list, text_segments: list, sebi_analysis: dict) -> list:
     """
@@ -145,41 +301,101 @@ def run_pipeline(job_id: str, temp_job_dir: str, file_path: str):
         jobs[job_id]["stage"] = "stage3_audio"
         audio = run_stage3_audio(ingest.get("audio_path"), job_id, transcript=tx.get("transcript", ""))
 
-        # Stage 5: LLM
+        # Stage 7 (video keyframe OCR): extract on-screen text with visual deduplication
+        # and timestamp tracking, so both financial risk (Stage 5) and domain/phishing checks (Stage 9)
+        # can analyze on-screen text (e.g. Telegram handles, returns promises, fake certificates).
+        jobs[job_id]["stage"] = "stage7_ocr"
+        keyframes_for_ocr = ingest.get("keyframes") or ingest.get("face_frames_paths", [])
+        video_ocr_result = run_video_keyframes_ocr(keyframes_for_ocr, job_id)
+        video_ocr_text = video_ocr_result.get("extracted_text", "").strip()
+
+        # Stage 5: LLM (analyzes transcript + on-screen video text with timestamped segments)
         jobs[job_id]["stage"] = "stage5_llm"
-        llm = run_stage5_llm(tx.get("transcript", ""), job_id)
+        llm = run_stage5_llm(tx.get("transcript", ""), job_id, ocr_text=video_ocr_text, segments=tx.get("segments", []))
 
         # Stage 6: Registry
         jobs[job_id]["stage"] = "stage6_registry"
         registry = run_stage6_registry(llm, job_id)
 
-        # Stage 9: Phishing domain check on transcript
+        # Stage 9: Phishing domain check on transcript + video OCR text
         jobs[job_id]["stage"] = "stage9_apk_domain"
-        stage9 = run_stage9_apk_domain(job_id, ocr_text=tx.get("transcript", "")) if tx.get("transcript") else {}
+        combined_text = " ".join(
+            t for t in [tx.get("transcript", ""), video_ocr_text] if t
+        ).strip()
+        stage9 = run_stage9_apk_domain(job_id, ocr_text=combined_text) if combined_text else {}
 
         # Stage 8: Auto-generate SCORES legal evidence dossier
         jobs[job_id]["stage"] = "stage8_report"
         
         # Stage 7: Aggregation & Final Verdict
+        # Stage 7: Aggregation & Final Verdict
         jobs[job_id]["stage"] = "stage7_aggregation"
-        vision_thresh = get_threshold("vision_fake_threshold", 0.5)
+        vision_thresh = get_vision_threshold()
         audio_thresh  = get_threshold("audio_fake_threshold", 0.5)
 
-        is_deepfake = (
-            vision.get("max_score", 0.0) > vision_thresh or
-            audio.get("max_score", 0.0) > audio_thresh
-        )
-        is_scam = llm.get("is_scam_likely", False)
+        # Track degraded modules safely without confusing failure with safety or fake
+        degraded_modules = []
+        if llm.get("fallback_used"):
+            degraded_modules.append("stage5_llm")
+        if audio.get("status") == "error":
+            degraded_modules.append("stage3_audio")
+        if vision.get("status") == "error":
+            degraded_modules.append("stage2_vision")
+
+        # Validate numeric detector scores safely within [0.0, 1.0]
+        raw_v_score = vision.get("max_score")
+        if raw_v_score is not None and isinstance(raw_v_score, (int, float)) and not np.isnan(raw_v_score):
+            vision_score = float(np.clip(raw_v_score, 0.0, 1.0))
+        else:
+            vision_score = 0.0 if vision.get("status") != "error" else None
+
+        raw_a_score = audio.get("max_score")
+        if raw_a_score is not None and isinstance(raw_a_score, (int, float)) and not np.isnan(raw_a_score):
+            audio_score = float(np.clip(raw_a_score, 0.0, 1.0))
+        else:
+            audio_score = 0.0 if audio.get("status") != "error" else None
+
+        has_vision_fake = (vision_score is not None and vision_score > vision_thresh)
+        has_audio_fake = (audio_score is not None and audio_score > audio_thresh)
+        is_deepfake = bool(has_vision_fake or has_audio_fake)
+
+        is_scam = bool(llm.get("is_scam_likely", False))
         if stage9.get("any_threat_detected"):
             is_scam = True
-        composite_risk = llm.get("composite_risk_score", 0.0)
+        composite_risk = float(llm.get("composite_risk_score", 0.0))
+        fallback_used = bool(llm.get("fallback_used", False))
         
         verdict = calculate_calibrated_verdict(
-            is_deepfake, is_scam, composite_risk, registry.get("verdict", "not claimed")
+            is_deepfake, is_scam, composite_risk, registry.get("verdict", "not claimed"),
+            fallback_used=fallback_used, degraded_modules=degraded_modules
         )
 
         timeline_track = build_timeline_risk_track(
             audio.get("all_segments", []), tx.get("segments", []), llm
+        )
+
+        evidence_breakdown = build_evidence_breakdown(
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            composite_risk=composite_risk,
+            registry_check=registry,
+            sebi_analysis=llm,
+            audio_score=audio_score if audio_score is not None else 0.0,
+            vision_score=vision_score if vision_score is not None else 0.0,
+            domain_scan=stage9.get("ocr_domain_result"),
+            degraded_modules=degraded_modules
+        )
+
+        overall_summary = build_overall_verdict_summary(
+            verdict=verdict,
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            vision_score=vision_score,
+            audio_score=audio_score,
+            composite_risk=composite_risk,
+            sebi_analysis=llm,
+            registry_check=registry,
+            degraded_modules=degraded_modules
         )
 
         result_payload = {
@@ -187,22 +403,35 @@ def run_pipeline(job_id: str, temp_job_dir: str, file_path: str):
             "is_deepfake": is_deepfake,
             "is_scam": is_scam,
             "composite_risk_score": composite_risk,
-            "vision_score": vision.get("max_score", 0.0),
+            "evidence_breakdown": evidence_breakdown,
+            "overall_summary": overall_summary,
+            "vision_score": vision_score,
             "vision_temporal_variance": vision.get("temporal_variance", 0.0),
+            "vision_frame_scores": vision.get("frame_scores", []),
+            "vision_aggregation_details": vision.get("aggregation_details", {}),
             "mouth_motion_activity": vision.get("mouth_motion_activity", 0.0),
             "heatmap_base64": vision.get("heatmap_base64"),
-            "audio_score": audio.get("max_score", 0.0),
+            "audio_score": audio_score,
+            "audio_backend": audio.get("model_backend"),
+            "audio_model_id": audio.get("model_id"),
+            "audio_model_revision": audio.get("revision"),
+            "audio_raw_peak_score": audio.get("raw_peak_score", audio_score),
+            "audio_windows_flagged": len(audio.get("flagged_segments", [])),
+            "audio_total_windows": len(audio.get("all_segments", [])),
             "flagged_audio_segments": audio.get("flagged_segments", []),
             "all_audio_segments": audio.get("all_segments", []),
             "impersonation_check": audio.get("impersonation_check", {}),
             "domain_scan": stage9.get("ocr_domain_result"),
+            "video_keyframe_ocr": video_ocr_result,
             "transcript": tx.get("transcript", ""),
             "dpdp_pii_scrubbed_count": llm.get("dpdp_pii_scrubbed_count", 0),
             "hinglish_slang_detected": llm.get("hinglish_slang_detected", []),
             "segments": tx.get("segments", []),
+            "segments_analysis": llm.get("segments_analysis", []),
             "timeline_track": timeline_track,
             "sebi_analysis": llm,
             "registry_check": registry,
+            "degraded_modules": degraded_modules,
             "input_quality": ingest.get("quality_assessment", {
                 "rating": "Standard",
                 "sharpness_score": 0.0,
@@ -311,7 +540,29 @@ async def scan_text(req: TextScanRequest):
     if stage9.get("any_threat_detected"):
         is_scam = True
     composite_risk = llm.get("composite_risk_score", 0.0)
-    verdict = calculate_calibrated_verdict(False, is_scam, composite_risk, registry.get("verdict", "not claimed"))
+    fallback_used = llm.get("fallback_used", False)
+    degraded_modules = ["stage5_llm"] if fallback_used else []
+
+    verdict = calculate_calibrated_verdict(
+        is_deepfake=False,
+        is_scam=is_scam,
+        composite_risk=composite_risk,
+        registry_verdict=registry.get("verdict", "not claimed"),
+        fallback_used=fallback_used,
+        degraded_modules=degraded_modules
+    )
+
+    evidence_breakdown = build_evidence_breakdown(
+        is_deepfake=False,
+        is_scam=is_scam,
+        composite_risk=composite_risk,
+        registry_check=registry,
+        sebi_analysis=llm,
+        audio_score=0.0,
+        vision_score=0.0,
+        domain_scan=stage9.get("ocr_domain_result"),
+        degraded_modules=degraded_modules
+    )
 
     result = {
         "scan_type": "text",
@@ -321,6 +572,7 @@ async def scan_text(req: TextScanRequest):
         "domain_scan": stage9.get("ocr_domain_result"),
         "sebi_analysis": llm,
         "registry_check": registry,
+        "evidence_breakdown": evidence_breakdown,
     }
     result["scores_complaint"] = generate_sebi_scores_complaint(result, "Text / Social Media Post")
     return result
@@ -328,7 +580,7 @@ async def scan_text(req: TextScanRequest):
 
 # ── Audio Scan ──────────────────────────────────────────────────────
 @app.post("/api/scan/audio")
-async def scan_audio(file: UploadFile = File(...)):
+def scan_audio(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file uploaded")
     validate_file_size(file)
@@ -357,8 +609,8 @@ async def scan_audio(file: UploadFile = File(...)):
         # Stage 9 Phishing domain check on transcript
         stage9 = run_stage9_apk_domain(job_id, ocr_text=tx.get("transcript", "")) if tx.get("transcript") else {}
 
-        # Stage 5 LLM
-        llm = run_stage5_llm(tx.get("transcript", ""), job_id)
+        # Stage 5 LLM (with transcript segments for timestamp-aware reasoning)
+        llm = run_stage5_llm(tx.get("transcript", ""), job_id, segments=tx.get("segments", []))
 
         # Stage 6 Registry
         registry = run_stage6_registry(llm, job_id)
@@ -370,13 +622,48 @@ async def scan_audio(file: UploadFile = File(...)):
         if stage9.get("any_threat_detected"):
             is_scam = True
         composite_risk = llm.get("composite_risk_score", 0.0)
+        fallback_used = llm.get("fallback_used", False)
+        degraded_modules = []
+        if fallback_used:
+            degraded_modules.append("stage5_llm")
+        if audio.get("status") == "error":
+            degraded_modules.append("stage3_audio")
 
         verdict = calculate_calibrated_verdict(
-            is_deepfake, is_scam, composite_risk, registry.get("verdict", "not claimed")
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            composite_risk=composite_risk,
+            registry_verdict=registry.get("verdict", "not claimed"),
+            fallback_used=fallback_used,
+            degraded_modules=degraded_modules
         )
 
         timeline_track = build_timeline_risk_track(
             audio.get("all_segments", []), tx.get("segments", []), llm
+        )
+
+        evidence_breakdown = build_evidence_breakdown(
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            composite_risk=composite_risk,
+            registry_check=registry,
+            sebi_analysis=llm,
+            audio_score=audio.get("max_score", 0.0),
+            vision_score=None,
+            domain_scan=stage9.get("ocr_domain_result"),
+            degraded_modules=degraded_modules
+        )
+
+        overall_summary = build_overall_verdict_summary(
+            verdict=verdict,
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            vision_score=None,
+            audio_score=audio.get("max_score", 0.0),
+            composite_risk=composite_risk,
+            sebi_analysis=llm,
+            registry_check=registry,
+            degraded_modules=degraded_modules
         )
 
         result = {
@@ -385,16 +672,34 @@ async def scan_audio(file: UploadFile = File(...)):
             "is_deepfake": is_deepfake,
             "is_scam": is_scam,
             "composite_risk_score": composite_risk,
+            "overall_summary": overall_summary,
+            "vision_score": None,
             "audio_score": audio.get("max_score", 0.0),
+            "audio_backend": audio.get("model_backend"),
+            "audio_model_id": audio.get("model_id"),
+            "audio_model_revision": audio.get("revision"),
+            "audio_raw_peak_score": audio.get("raw_peak_score", audio.get("max_score", 0.0)),
+            "audio_windows_flagged": len(audio.get("flagged_segments", [])),
+            "audio_total_windows": len(audio.get("all_segments", [])),
             "flagged_audio_segments": audio.get("flagged_segments", []),
             "all_audio_segments": audio.get("all_segments", []),
             "impersonation_check": audio.get("impersonation_check", {}),
             "domain_scan": stage9.get("ocr_domain_result"),
             "transcript": tx.get("transcript", ""),
             "segments": tx.get("segments", []),
+            "segments_analysis": llm.get("segments_analysis", []),
+            "content_intent": llm.get("content_intent"),
+            "speaker_stance": llm.get("speaker_stance"),
+            "awareness_context_detected": llm.get("awareness_context_detected", False),
+            "is_scam_likely": llm.get("is_scam_likely", is_scam),
+            "dpdp_pii_scrubbed_count": llm.get("dpdp_pii_scrubbed_count", 0),
+            "hinglish_slang_detected": llm.get("hinglish_slang_detected", []),
+            "degraded_modules": degraded_modules,
+            "fallback_used": fallback_used,
             "timeline_track": timeline_track,
             "sebi_analysis": llm,
             "registry_check": registry,
+            "evidence_breakdown": evidence_breakdown,
         }
         result["scores_complaint"] = generate_sebi_scores_complaint(result, "Audio Broadcast / Podcast")
         return result
@@ -441,8 +746,7 @@ async def scan_image(file: UploadFile = File(...)):
         # Stage 6: Registry
         registry = run_stage6_registry(llm, job_id) if llm else {"verdict": "not claimed", "matched_entity": None}
 
-        from src.config import get_threshold
-        vision_thresh = get_threshold("vision_fake_threshold", 0.5)
+        vision_thresh = get_vision_threshold()
 
         is_deepfake = vision.get("max_score", 0.0) > vision_thresh
         is_scam = llm.get("is_scam_likely", False) if llm else False
@@ -450,9 +754,28 @@ async def scan_image(file: UploadFile = File(...)):
         if stage9.get("any_threat_detected"):
             is_scam = True
         composite_risk = llm.get("composite_risk_score", 0.0) if llm else 0.0
+        fallback_used = llm.get("fallback_used", False) if llm else False
+        degraded_modules = ["stage5_llm"] if fallback_used else []
 
         verdict = calculate_calibrated_verdict(
-            is_deepfake, is_scam, composite_risk, registry.get("verdict", "not claimed")
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            composite_risk=composite_risk,
+            registry_verdict=registry.get("verdict", "not claimed"),
+            fallback_used=fallback_used,
+            degraded_modules=degraded_modules
+        )
+
+        evidence_breakdown = build_evidence_breakdown(
+            is_deepfake=is_deepfake,
+            is_scam=is_scam,
+            composite_risk=composite_risk,
+            registry_check=registry,
+            sebi_analysis=llm,
+            audio_score=0.0,
+            vision_score=vision.get("max_score", 0.0),
+            domain_scan=stage9.get("ocr_domain_result"),
+            degraded_modules=degraded_modules
         )
 
         result = {
@@ -469,6 +792,7 @@ async def scan_image(file: UploadFile = File(...)):
             "domain_scan": stage9.get("ocr_domain_result"),
             "sebi_analysis": llm if llm else {},
             "registry_check": registry,
+            "evidence_breakdown": evidence_breakdown,
         }
         result["scores_complaint"] = generate_sebi_scores_complaint(result, "Screenshot / Image Post")
         return result

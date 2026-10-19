@@ -1,29 +1,64 @@
 /* ============================================================================
-   Adapter — raw backend payload → view model.
+   FinGuard Model Adapter — Raw Backend Payload -> View Model
    ----------------------------------------------------------------------------
-   Presentation code reads only what this module returns, so a change in the
-   backend's response shape is a change to this one file.
+   Strictly separates:
+     1. Overall Assessment
+     2. Video Authenticity (Visual deepfake forensics)
+     3. Audio Authenticity (Voice deepfake & cloning forensics)
+     4. Scam or Misleading Financial Content (SEBI regulatory & fraud intent)
+     5. Registry Verification (SEBI official database checks)
+     6. Network & App Security (URLs, APKs, domains)
+     7. Quoted Evidence & Findings Audit Trail
+     8. Actionable Recommended Next Steps
 
-   Every field read here exists in the payloads assembled by app.py. Where a
-   scan type does not produce a signal (there is no visual score in an audio
-   scan) the category is marked unavailable rather than filled with a zero,
-   because a zero would read as "clean" when it means "not examined".
+   Verdicts mapped to simple, transparent consumer labels:
+     - No clear warning signs found.
+     - Review recommended.
+     - Possible scam detected.
+     - Possible AI-generated or altered content.
+     - Analysis incomplete.
    ========================================================================= */
 
 import { fmtClock } from './dom.js';
 
-/* ── Verdict → risk tier ─────────────────────────────────────────────────── */
+/* ── Verdict & Risk Tier Mapping ─────────────────────────────────────────── */
 
-const TIERS = {
-  critical: { key: 'critical', label: 'Critical risk', rank: 4 },
-  high:     { key: 'high',     label: 'High risk',     rank: 3 },
-  moderate: { key: 'moderate', label: 'Moderate risk', rank: 2 },
-  low:      { key: 'low',      label: 'Low risk',      rank: 1 },
-  unknown:  { key: 'unknown',  label: 'Inconclusive',  rank: 0 },
+export const TIERS = {
+  critical: { key: 'critical', label: 'Critical Risk', rank: 4, badgeClass: 'fg-badge--crit' },
+  high:     { key: 'high',     label: 'High Risk',     rank: 3, badgeClass: 'fg-badge--high' },
+  moderate: { key: 'moderate', label: 'Review Recommended', rank: 2, badgeClass: 'fg-badge--warn' },
+  low:      { key: 'low',      label: 'Low Risk',      rank: 1, badgeClass: 'fg-badge--safe' },
+  unknown:  { key: 'unknown',  label: 'Inconclusive',  rank: 0, badgeClass: 'fg-badge--idle' },
 };
 
-/** app.py's calculate_calibrated_verdict emits exactly four prefixes. */
-export function tierFromVerdict(verdict) {
+/**
+ * Maps the backend's calibrated verdict string to simple, transparent labels
+ * as required by banking guidelines.
+ */
+export function mapVerdictLabel(rawVerdict, isDeepfake, isScam, degraded = false) {
+  if (degraded) return 'Analysis incomplete';
+  const v = String(rawVerdict || '').toLowerCase();
+
+  if (v.includes('deepfake + scam') || (isDeepfake && isScam)) {
+    return 'Possible scam and AI-generated content detected';
+  }
+  if (v.includes('deepfake') || isDeepfake) {
+    return 'Possible AI-generated or altered content';
+  }
+  if (v.includes('scam') || v.includes('violation') || isScam) {
+    return 'Possible scam detected';
+  }
+  if (v.includes('review') || v.includes('suspicious')) {
+    return 'Review recommended';
+  }
+  if (v.includes('safe') || v.includes('clean')) {
+    return 'No clear warning signs found';
+  }
+  return 'Review recommended';
+}
+
+export function tierFromVerdict(verdict, degraded = false) {
+  if (degraded) return TIERS.unknown;
   const v = String(verdict || '').toLowerCase();
   if (v.startsWith('critical')) return TIERS.critical;
   if (v.startsWith('warning')) return TIERS.high;
@@ -35,76 +70,88 @@ export function tierFromVerdict(verdict) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const arr = (v) => (Array.isArray(v) ? v.filter(Boolean) : []);
 
-/** Detector scores: 0.5 is the configured threshold in config.yaml. */
-function detectorTier(score) {
-  if (score === null) return 'unknown';
-  if (score >= 0.5) return 'high';
-  if (score >= 0.3) return 'moderate';
-  return 'low';
-}
-
-/** Composite scam score: 0.45 is the backend's auto-flag threshold. */
-function scamTier(score, isScam) {
-  if (score === null) return 'unknown';
-  if (isScam || score >= 0.45) return 'high';
-  if (score >= 0.3) return 'moderate';
-  return 'low';
-}
-
-const REGISTRY_READING = {
-  'verified':             { tier: 'low',      label: 'Verified',              text: 'The claimed identity matches a registered entry in the registry.' },
-  'not claimed':          { tier: 'unknown',  label: 'No claim made',         text: 'No advisor name or registration number was claimed, so there was nothing to verify. Absence of a claim is not the same as being registered.' },
-  'not found':            { tier: 'high',     label: 'Not in registry',       text: 'The claimed identity does not appear in the registry. Advertising investment advice without registration is itself a violation.' },
-  'malformed number':     { tier: 'high',     label: 'Malformed number',      text: 'The registration number does not match the format SEBI issues, so it cannot be a valid registration.' },
-  'name-number mismatch': { tier: 'critical', label: 'Registered elsewhere',  text: 'The registration number is real but belongs to a different entity. Borrowing a genuine number is a deliberate misrepresentation, not a clerical slip.' },
-};
-
-/* ── Scam signal labels (keys come from SIGNAL_WEIGHTS in stage5_llm.py) ─── */
-
 export const SIGNAL_LABELS = {
   explicit_returns:  'Guaranteed returns',
   implied_returns:   'Implied returns',
-  urgency_scarcity:  'Urgency and scarcity',
-  social_proof:      'Inflated social proof',
-  paywall_push:      'Paywall push',
-  credential_misrep: 'Credential misrepresentation',
+  urgency_scarcity:  'Urgency and artificial deadlines',
+  social_proof:      'Fabricated social proof',
+  paywall_push:      'Directing to private/paid channels',
+  credential_misrep: 'Credential & license misrepresentation',
 };
-
-/* ── Quoted-claim groups (fields come from the SEBIAnalysis model) ───────── */
 
 const CLAIM_GROUPS = [
   {
-    field: 'specific_return_promises', kind: 'Guaranteed return', tier: 'high', flag: 'explicit_return',
-    why: 'A promised or assured return is the clearest marker of unregistered investment advice. No registered adviser may guarantee a market outcome.',
+    field: 'specific_return_promises',
+    kind: 'Guaranteed Return Claim',
+    tier: 'high',
+    why: 'Promising or guaranteeing specific stock market returns violates SEBI regulations. Legitimate advisers cannot guarantee market returns.',
   },
   {
-    field: 'implied_returns', kind: 'Implied return', tier: 'moderate', flag: 'implied_return',
-    why: 'A return implied without being promised outright sets the same expectation while leaving room to deny it later.',
+    field: 'implied_returns',
+    kind: 'Implied Return',
+    tier: 'moderate',
+    why: 'Heavily implying risk-free or outsized gains creates false expectations while evading explicit legal guarantees.',
   },
   {
-    field: 'urgency_scarcity_language', kind: 'Urgency', tier: 'moderate', flag: 'urgency',
-    why: 'Deadlines and limited spots exist to stop you verifying. Legitimate advice survives a delay.',
+    field: 'urgency_scarcity_language',
+    kind: 'Urgency & Pressure Tactic',
+    tier: 'moderate',
+    why: 'Creating pressure to invest immediately or claim limited spots is intended to prevent the investor from verifying credentials.',
   },
   {
-    field: 'social_proof_inflation', kind: 'Social proof', tier: 'moderate', flag: null,
-    why: 'Member counts and testimonials are cheap to fabricate and are used to substitute for a track record.',
+    field: 'social_proof_inflation',
+    kind: 'Exaggerated Social Proof',
+    tier: 'moderate',
+    why: 'Unsubstantiated claims of thousands of satisfied VIP members are frequently fabricated in investment scams.',
   },
   {
-    field: 'paywall_push', kind: 'Paywall push', tier: 'moderate', flag: 'paywall',
-    why: 'Charging for advice is what registration governs. A push to a paid channel is where an unregistered operator takes payment.',
+    field: 'paywall_push',
+    kind: 'Private Channel / Paywall Push',
+    tier: 'moderate',
+    why: 'Directing viewers to private WhatsApp or Telegram groups is the standard pathway used by unregistered operators.',
   },
   {
-    field: 'credential_misrepresentation', kind: 'Credentials', tier: 'high', flag: null,
-    why: 'An overstated or invented credential is intended to borrow authority the speaker has not earned.',
+    field: 'credential_misrepresentation',
+    kind: 'Credential Claim',
+    tier: 'high',
+    why: 'Claiming fictitious registration or misrepresenting qualifications attempts to borrow false authority.',
   },
 ];
 
-/* ── Timestamp resolution ────────────────────────────────────────────────── */
+const REGISTRY_READING = {
+  'verified': {
+    tier: 'low',
+    badge: 'Verified Entity',
+    label: 'SEBI Registered Adviser Confirmed',
+    text: 'The claimed adviser name and registration number match an active record in the SEBI intermediary registry.',
+  },
+  'not claimed': {
+    tier: 'unknown',
+    badge: 'No Claim Made',
+    label: 'No Registration Number Claimed',
+    text: 'The content did not claim a specific SEBI registration number or entity identity.',
+  },
+  'not found': {
+    tier: 'moderate',
+    badge: 'Unregistered Claim',
+    label: 'Registration Number Not Found in Registry',
+    text: 'The claimed name or registration number was not found in the official SEBI registry snapshot. Unregistered advice warrants caution.',
+  },
+  'malformed number': {
+    tier: 'high',
+    badge: 'Invalid Format',
+    label: 'Malformed Registration Number',
+    text: 'The quoted registration number does not adhere to official SEBI registration numbering standards.',
+  },
+  'name-number mismatch': {
+    tier: 'critical',
+    badge: 'Impersonation Flag',
+    label: 'Registration Number Belongs to Different Entity',
+    text: 'The registration number quoted exists in the registry, but belongs to a completely different entity. This indicates deliberate impersonation.',
+  },
+};
 
-/**
- * The backend already timestamps flagged quotes in `timeline_track`. Prefer
- * that; fall back to a substring search across transcript segments.
- */
+/** Extracts quote timestamps from timeline segments. */
 function buildQuoteClock(raw) {
   const index = new Map();
   for (const entry of arr(raw.timeline_track)) {
@@ -123,17 +170,81 @@ function buildQuoteClock(raw) {
   };
 }
 
-/* ── Main adapter ────────────────────────────────────────────────────────── */
+/* ── Clean Up Internal Diagnostics for User-Facing Explanations ───────────── */
+
+function cleanDiagnosticTags(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\[HEURISTIC FALLBACK:[^\]]*\]\s*/gi, '')
+    .replace(/\[REVIEW REQUIRED\]\s*/gi, '')
+    .trim();
+}
+
+/* ── Recommended Next Steps Generator ────────────────────────────────────── */
+
+function generateNextSteps(isDeepfake, isScam, registryVerdict, hasThreats) {
+  const steps = [];
+
+  if (isScam || hasThreats) {
+    steps.push({
+      priority: 'high',
+      title: 'Do not transfer funds or share financial credentials',
+      body: 'Never send money, share your UPI PIN, or provide Demat account login details. Legitimate registered entities never demand immediate wire transfers into private accounts.',
+    });
+    steps.push({
+      priority: 'high',
+      title: 'Report suspicious operators to SEBI and Cyber Crime',
+      body: 'You can report unregistered entities directly on the SEBI SCORES 2.0 portal (scores.sebi.gov.in) and report cyber fraud to the National Cyber Crime Reporting Portal (cybercrime.gov.in or helpline 1930).',
+    });
+  }
+
+  if (isDeepfake) {
+    steps.push({
+      priority: 'high',
+      title: 'Verify identity through independent secondary channels',
+      body: 'The voice or face in this media shows indicators of AI generation or manipulation. Do not trust familiar faces or executive voices in investment solicitations without independent confirmation.',
+    });
+  }
+
+  if (registryVerdict === 'name-number mismatch' || registryVerdict === 'not found') {
+    steps.push({
+      priority: 'moderate',
+      title: 'Independently check the SEBI Intermediary Database',
+      body: 'Always verify investment advisers directly on the official SEBI website (sebi.gov.in) under "Recognised Intermediaries" before engaging in any advisory relationship.',
+    });
+  }
+
+  if (steps.length === 0) {
+    steps.push({
+      priority: 'low',
+      title: 'Maintain standard financial vigilance',
+      body: 'While no overt scam indicators or synthetic manipulation were identified, always conduct independent due diligence before making investment decisions.',
+    });
+  }
+
+  return steps;
+}
+
+/* ── Main Adapter Function ───────────────────────────────────────────────── */
 
 /**
- * @param {object} raw    the payload from any of the four scan endpoints
- * @param {object} meta   {mode, filename, jobId, size, startedAt}
+ * Converts a raw backend API payload into a structured, reliable view model.
+ *
+ * @param {object} raw   The response payload from any scan endpoint or completed job
+ * @param {object} meta  { mode, filename, jobId, size, startedAt }
  */
 export function toViewModel(raw, meta = {}) {
   const sebi = raw.sebi_analysis || {};
   const registry = raw.registry_check || {};
   const impersonation = raw.impersonation_check || {};
-  const tier = tierFromVerdict(raw.verdict);
+  const degradedModules = arr(raw.degraded_modules);
+  const isDegraded = degradedModules.length > 0 && Boolean(raw.fallback_used);
+
+  const isDeepfake = Boolean(raw.is_deepfake);
+  const isScam = Boolean(raw.is_scam);
+  const rawVerdict = String(raw.verdict || 'Suspicious: Review Recommended');
+  const verdictLabel = mapVerdictLabel(rawVerdict, isDeepfake, isScam, isDegraded);
+  const tier = tierFromVerdict(rawVerdict, isDegraded);
   const clockFor = buildQuoteClock(raw);
 
   const visionScore = num(raw.vision_score);
@@ -141,355 +252,393 @@ export function toViewModel(raw, meta = {}) {
   const scamScore = num(raw.composite_risk_score);
   const flaggedAudio = arr(raw.flagged_audio_segments);
   const audioSegments = arr(raw.all_audio_segments);
-  const isScam = Boolean(raw.is_scam);
 
-  /* Peak signal: the strongest single detector reading. This mirrors how the
-     backend actually escalates — any one detector crossing its threshold
-     raises the verdict — so the headline number is the loudest signal, not an
-     average that would bury it. */
+  /* Attribute peak signal specifically without merging */
   const signalInputs = [
-    { key: 'Visual', value: visionScore },
-    { key: 'Voice', value: audioScore },
-    { key: 'Scam composite', value: scamScore },
-  ].filter((s) => s.value !== null);
-  const peakSignal = signalInputs.length ? Math.max(...signalInputs.map((s) => s.value)) : null;
+    { key: 'visual', label: 'Visual detector score', value: visionScore },
+    { key: 'voice',  label: 'AI Voice Score',        value: audioScore },
+    { key: 'scam',   label: 'Financial risk score',  value: scamScore },
+  ].filter((s) => s.value !== null && Number.isFinite(s.value));
 
-  /* ── Categories ───────────────────────────────────────────────────────── */
-  const categories = [];
+  const leadingSignal = signalInputs.length
+    ? signalInputs.reduce((max, cur) => cur.value > max.value ? cur : max)
+    : null;
+  const peakSignal = leadingSignal ? leadingSignal.value : null;
+  const peakSignalLabel = leadingSignal ? leadingSignal.label : 'Score';
 
-  // 1 · Visual authenticity
+  /* ── 1. Video Authenticity (Visual Forensics) ─────────────────────────── */
+  let videoModality = null;
   if (visionScore === null) {
-    categories.push({
-      id: 'visual', name: 'Visual authenticity', score: null, tier: 'unknown',
-      status: 'Not examined', stage: 'Stage 02 · vision',
-      text: 'This scan type carries no video frames, so the visual detector did not run.',
-      count: 0, detail: [],
-    });
+    videoModality = {
+      available: false,
+      title: 'Video Authenticity',
+      status: 'Not examined',
+      score: null,
+      scoreFormatted: 'N/A',
+      summary: 'This scan did not contain video frames, so visual forensic analysis was not performed.',
+      isFlagged: false,
+      heatmap: null,
+      details: [],
+    };
   } else {
-    const noFaces = visionScore === 0 && !raw.heatmap_base64;
-    categories.push({
-      id: 'visual',
-      name: 'Visual authenticity',
+    const isVisionFlagged = visionScore >= 0.50;
+    videoModality = {
+      available: true,
+      title: 'Video Authenticity',
+      status: isVisionFlagged ? 'Visual manipulation indicated' : 'No visual manipulation detected',
       score: visionScore,
-      tier: noFaces ? 'unknown' : detectorTier(visionScore),
-      status: noFaces ? 'No face scored' : (visionScore >= 0.5 ? 'Manipulation indicated' : 'No manipulation indicated'),
-      stage: 'Stage 02 · vision',
-      text: noFaces
-        ? 'No face region was scored. Either no face was detected in the sampled frames, or nothing registered above zero.'
-        : visionScore >= 0.5
-          ? 'Face regions scored above the manipulation threshold. Inspect the noise-residual heatmap before drawing a conclusion.'
-          : 'Sampled face regions scored below the manipulation threshold.',
-      count: raw.heatmap_base64 ? 1 : 0,
-      detail: [
-        ['Peak frame score', visionScore === null ? '—' : `${(visionScore * 100).toFixed(1)}%`],
-        ['Threshold', '50.0%'],
-        num(raw.vision_temporal_variance) !== null
-          ? ['Temporal variance', raw.vision_temporal_variance.toFixed(4)] : null,
-        raw.backup_provider ? ['Scored by', raw.backup_provider] : null,
-      ].filter(Boolean),
-    });
+      scoreFormatted: `${(visionScore * 100).toFixed(1)}%`,
+      summary: isVisionFlagged
+        ? 'Facial regions scored above the manipulation threshold. Spatial and frequency residuals indicate potential deepfake alterations.'
+        : 'Sampled face frames scored below the visual manipulation threshold.',
+      isFlagged: isVisionFlagged,
+      heatmap: raw.heatmap_base64 || null,
+      details: [
+        { label: 'Visual Detector Score', value: `${(visionScore * 100).toFixed(1)}%` },
+        { label: 'Evaluation Threshold', value: '50.0%' },
+        { label: 'Temporal Variance', value: num(raw.vision_temporal_variance) !== null ? raw.vision_temporal_variance.toFixed(4) : 'N/A' },
+      ],
+    };
   }
 
-  // 2 · Voice authenticity
+  /* ── 2. Audio Check ─────────────────────────────────────────────────────── */
+  let audioModality = null;
   if (audioScore === null) {
-    categories.push({
-      id: 'voice', name: 'Voice authenticity', score: null, tier: 'unknown',
-      status: 'Not examined', stage: 'Stage 03 · audio',
-      text: 'This scan type carries no audio track, so the voice detector did not run.',
-      count: 0, detail: [],
-    });
+    audioModality = {
+      available: false,
+      title: 'Audio Check',
+      status: 'Not examined',
+      score: null,
+      scoreFormatted: 'N/A',
+      summary: 'No audio was found in this file.',
+      isFlagged: false,
+      flaggedCount: 0,
+      totalWindows: 0,
+      details: [],
+    };
   } else {
-    const noAudio = audioSegments.length === 0;
-    categories.push({
-      id: 'voice',
-      name: 'Voice authenticity',
+    const isSynthetic = (raw.is_deepfake !== undefined && raw.is_deepfake !== null)
+      ? raw.is_deepfake
+      : (audioScore >= 0.50);
+    const isAudioDegraded = degradedModules.includes('stage3_audio');
+    const totalParts = audioSegments.length || 1;
+    const flaggedParts = flaggedAudio.length;
+
+    // Plain, everyday English status:
+    // - "AI Voice Detected": classified as synthetic (score >= 0.50)
+    // - "Could Not Confirm Voice Type": inconclusive / degraded
+    // - "Human Voice Detected": classified as genuine
+    let audioStatus = 'Human Voice Detected';
+    let audioBadgeClass = 'fg-badge--safe';
+
+    if (isSynthetic) {
+      audioStatus = 'AI Voice Detected';
+      audioBadgeClass = 'fg-badge--high';
+    } else if (isAudioDegraded) {
+      audioStatus = 'Could Not Confirm Voice Type';
+      audioBadgeClass = 'fg-badge--warn';
+    }
+
+    let audioSummary = `All ${totalParts} evaluated audio parts show natural human voice patterns.`;
+    if (audioStatus === 'AI Voice Detected') {
+      audioSummary = `${flaggedParts} of ${totalParts} audio parts showed AI-generated voice characteristics (AI Voice Score: ${(audioScore * 100).toFixed(1)}%).`;
+    } else if (audioStatus === 'Could Not Confirm Voice Type') {
+      audioSummary = `Audio evaluation was inconclusive or operated in degraded mode. Voice type could not be confirmed with certainty.`;
+    } else if (flaggedParts > 0) {
+      audioSummary = `${totalParts - flaggedParts} of ${totalParts} audio parts confirmed natural human voice patterns (AI Voice Score: ${(audioScore * 100).toFixed(1)}%).`;
+    }
+
+    audioModality = {
+      available: true,
+      title: 'Audio Check',
+      status: audioStatus,
       score: audioScore,
-      tier: noAudio ? 'unknown' : detectorTier(audioScore),
-      status: noAudio ? 'No audio scored' : (audioScore >= 0.5 ? 'Synthetic speech indicated' : 'No synthesis indicated'),
-      stage: 'Stage 03 · audio',
-      text: noAudio
-        ? 'No audio windows were scored. The track may be silent or absent.'
-        : audioScore >= 0.5
-          ? `${flaggedAudio.length} of ${audioSegments.length} audio windows scored above the spoof threshold.`
-          : `All ${audioSegments.length} audio windows scored below the spoof threshold.`,
-      count: flaggedAudio.length,
-      detail: [
-        ['Peak window score', `${(audioScore * 100).toFixed(1)}%`],
-        ['Threshold', '50.0%'],
-        ['Windows scored', String(audioSegments.length)],
-        ['Windows flagged', String(flaggedAudio.length)],
-        impersonation.target ? ['Name matched', impersonation.target] : null,
-      ].filter(Boolean),
-    });
+      scoreFormatted: `${(audioScore * 100).toFixed(1)}%`,
+      summary: audioSummary,
+      isFlagged: isAudioFlagged,
+      badgeClass: audioBadgeClass,
+      flaggedCount: flaggedParts,
+      totalWindows: totalParts,
+      impersonationTarget: impersonation.target || null,
+      details: [
+        { label: 'AI Voice Score', value: `${(audioScore * 100).toFixed(1)}%` },
+        { label: 'Evaluation Threshold', value: '50.0%' },
+        { label: 'Flagged Audio Parts', value: `${flaggedParts} of ${totalParts}` },
+        ...(impersonation.target ? [{ label: 'Impersonation Target', value: impersonation.target }] : []),
+      ],
+    };
   }
 
-  // 3 · Financial scam risk
+  /* ── 3. Scam Check ──────────────────────────────────────────────────────── */
   const signalScores = sebi.signal_scores && typeof sebi.signal_scores === 'object' ? sebi.signal_scores : {};
-  const quotedCount = CLAIM_GROUPS.reduce((n, g) => n + arr(sebi[g.field]).length, 0);
-  categories.push({
-    id: 'scam',
-    name: 'Financial scam risk',
+  const totalQuotedClaims = CLAIM_GROUPS.reduce((n, g) => n + arr(sebi[g.field]).length, 0);
+
+  const contentIntent = String(sebi.content_intent || raw.content_intent || '').toLowerCase();
+  const analysisStatus = String(sebi.analysis_status || raw.analysis_status || '').toLowerCase();
+  const speakerStance = String(sebi.speaker_stance || raw.speaker_stance || '').toLowerCase();
+  const awarenessDetected = Boolean(sebi.awareness_context_detected || raw.awareness_context_detected);
+  const isScamLikely = Boolean(sebi.is_scam_likely ?? raw.is_scam_likely ?? isScam);
+
+  const isAwareness = (
+    contentIntent === 'awareness_warning' ||
+    (awarenessDetected && !isScamLikely) ||
+    (speakerStance === 'warning' && !isScamLikely)
+  );
+
+  const isAmbiguous = !isScam && !isAwareness && (
+    contentIntent === 'ambiguous' ||
+    analysisStatus === 'conflict_review' ||
+    speakerStance === 'ambiguous'
+  );
+
+  let scamStatus = 'No Scam Patterns Detected';
+  let scamSummary = 'No fraudulent promises, pressure tactics, or scam patterns were identified in the spoken content.';
+  let quotedLabel = 'Quoted Statements';
+
+  if (isScam && !isAwareness) {
+    scamStatus = 'Scam Warning';
+    scamSummary = 'Speech or textual content contains high-risk promises, pressure tactics, or unauthorized investment advice.';
+    quotedLabel = 'Quoted Violations';
+  } else if (isAwareness) {
+    scamStatus = 'Awareness / Educational Content';
+    scamSummary = 'The speaker is warning listeners against financial scams, cautioning against fraud, or providing investor education.';
+    quotedLabel = 'Quoted / Discussed Examples';
+  } else if (isAmbiguous || isDegraded) {
+    scamStatus = 'Needs Review';
+    scamSummary = 'The content contains mixed, unverified, or unclear financial statements that require human review.';
+    quotedLabel = 'Extracted Claims for Review';
+  }
+
+  const scamModality = {
+    available: scamScore !== null,
+    title: 'Scam Check',
+    status: scamStatus,
     score: scamScore,
-    tier: scamTier(scamScore, isScam),
-    status: sebi.prompt_injection_detected ? 'Tampering detected'
-      : isScam ? 'Scam indicators present'
-      : scamScore === null ? 'Not examined'
-      : 'No scam pattern flagged',
-    stage: 'Stage 05 · compliance',
-    text: sebi.prompt_injection_detected
-      ? 'The content tried to instruct the compliance model to mark itself safe. That attempt is itself treated as evidence of fraud.'
-      : quotedCount > 0
-        ? `${quotedCount} quoted claim${quotedCount === 1 ? '' : 's'} matched one or more of the six weighted scam signals.`
-        : scamScore === null
-          ? 'No transcript or text reached the compliance stage.'
-          : 'No quoted claim matched a scam signal.',
-    count: quotedCount,
-    detail: Object.entries(SIGNAL_LABELS)
-      .filter(([key]) => key in signalScores)
-      .map(([key, label]) => [label, `${Math.round((signalScores[key] || 0) * 100)}%`]),
-  });
+    scoreFormatted: scamScore !== null ? `${(scamScore * 100).toFixed(0)}%` : 'N/A',
+    summary: scamSummary,
+    isFlagged: isScam && !isAwareness,
+    isReview: isAmbiguous || (isDegraded && !isScam && !isAwareness),
+    isAwareness: isAwareness,
+    badgeClass: (isScam && !isAwareness)
+      ? 'fg-badge--high'
+      : (isAmbiguous || (isDegraded && !isAwareness))
+        ? 'fg-badge--warn'
+        : (isAwareness || scamScore !== null)
+          ? 'fg-badge--safe'
+          : 'fg-badge--idle',
+    quotedLabel,
+    quotedCount: totalQuotedClaims,
+    injectionDetected: Boolean(sebi.prompt_injection_detected),
+    signals: Object.entries(SIGNAL_LABELS).map(([key, label]) => ({
+      key,
+      label,
+      score: signalScores[key] !== undefined ? Math.round((signalScores[key] || 0) * 100) : 0,
+      active: (signalScores[key] || 0) >= 0.35,
+    })),
+    segmentsAnalysis: arr(sebi.segments_analysis || raw.segments_analysis),
+  };
 
-  // 4 · SEBI / entity verification
+  /* ── 4. SEBI Registry Verification ────────────────────────────────────── */
   const registryVerdict = String(registry.verdict || 'not claimed');
-  const reading = REGISTRY_READING[registryVerdict] || { tier: 'unknown', label: registryVerdict, text: 'The registry check returned an unrecognised state.' };
-  const matched = registry.matched_entity || null;
-  categories.push({
-    id: 'sebi',
-    name: 'SEBI verification',
-    score: null,
-    tier: reading.tier,
-    status: reading.label,
-    stage: 'Stage 06 · registry',
-    text: reading.text,
-    count: matched ? 1 : 0,
-    detail: [
-      sebi.claimed_advisor_name ? ['Claimed name', sebi.claimed_advisor_name] : null,
-      sebi.claimed_registration_number ? ['Claimed number', sebi.claimed_registration_number] : null,
-      matched?.name ? ['Registered to', matched.name] : null,
-      matched?.registration_number ? ['Registry number', matched.registration_number] : null,
-      matched?.category || matched?.type ? ['Category', matched.category || matched.type] : null,
-      ['Outcome', registryVerdict],
-    ].filter(Boolean),
-  });
+  const registryInfo = REGISTRY_READING[registryVerdict] || {
+    tier: 'unknown',
+    badge: registryVerdict,
+    label: registryVerdict,
+    text: 'The registry verification returned an unrecognised state.',
+  };
+  const matchedEntity = registry.matched_entity || null;
+  const registryModality = {
+    available: true,
+    title: 'SEBI Registry Verification',
+    verdict: registryVerdict,
+    badge: registryInfo.badge,
+    label: registryInfo.label,
+    summary: registryInfo.text,
+    tier: registryInfo.tier,
+    isFlagged: registryInfo.tier === 'high' || registryInfo.tier === 'critical',
+    claimedName: sebi.claimed_advisor_name || null,
+    claimedNumber: sebi.claimed_registration_number || null,
+    matchedName: matchedEntity?.name || null,
+    matchedNumber: matchedEntity?.registration_number || null,
+    matchedCategory: matchedEntity?.category || matchedEntity?.type || null,
+  };
 
-  /* ── Evidence ─────────────────────────────────────────────────────────── */
+  /* ── 5. Network & App Security (URLs, Domains, APKs) ──────────────────── */
+  const domScan = raw.domain_scan || {};
+  const apkScan = raw.apk_analysis || raw.apk_result || {};
+  const urlScan = raw.url_result || {};
+  const hasNetworkThreats = Boolean(
+    domScan.is_phishing ||
+    urlScan.is_phishing ||
+    apkScan.is_suspicious ||
+    apkScan.suspicious
+  );
+
+  const networkModality = {
+    available: Boolean(raw.domain_scan || raw.apk_analysis || raw.apk_result || raw.url_result),
+    title: 'Network & Application Security',
+    hasThreats: hasNetworkThreats,
+    phishingDomain: domScan.domain || urlScan.domain || null,
+    phishingReason: domScan.reason || urlScan.reason || null,
+    targetBrand: domScan.closest_match || urlScan.closest_match || null,
+    apkPackage: apkScan.package_name || null,
+    dangerousPermissions: arr(apkScan.dangerous_permissions),
+  };
+
+  /* ── 6. Evidence Items Audit Trail ────────────────────────────────────── */
   const evidence = [];
   let seq = 0;
-  const push = (item) => { seq += 1; evidence.push({ id: `E${String(seq).padStart(2, '0')}`, ...item }); };
+  const pushEvidence = (item) => {
+    seq += 1;
+    evidence.push({ id: `E${String(seq).padStart(2, '0')}`, ...item });
+  };
 
-  const quality = raw.input_quality || {};
-  if (quality.rating && quality.rating !== 'Unknown') {
-    push({
-      kind: 'Input Quality', tier: quality.compression_flag ? 'moderate' : 'low', stage: 'Stage 01 · ingest',
-      title: `Media Quality: ${quality.rating}`,
-      body: `Video input assessed at ${quality.resolution || 'standard resolution'} with Laplacian sharpness index of ${quality.sharpness_score || 0}. ${quality.compression_flag ? 'Heavy compression artifacts detected; calibrated ensemble thresholds applied to maintain forensic sensitivity.' : 'Image clarity is sufficient for high-confidence forensic extraction.'}`,
-      quote: null, at: null,
-      kv: [
-        ['Resolution', quality.resolution || 'N/A'],
-        ['Sharpness Score', String(quality.sharpness_score || 0)],
-        ['Quality Rating', quality.rating],
-      ],
-    });
-  }
-
-  const metaForensics = raw.metadata_forensics || {};
-  if (metaForensics.status === 'available' || (metaForensics.forensic_observations && metaForensics.forensic_observations.length)) {
-    const vStream = metaForensics.video_stream || {};
-    const emb = metaForensics.embedded_metadata || {};
-    const prov = metaForensics.provenance || {};
-    const obsText = (metaForensics.forensic_observations || []).join('; ');
-    push({
-      kind: 'Media Metadata & Provenance',
-      tier: metaForensics.completeness === 'high' ? 'low' : metaForensics.completeness === 'medium' ? 'low' : 'moderate',
-      stage: 'Stage 01 · ingest',
-      title: `Metadata & Provenance (${metaForensics.completeness || 'standard'} completeness)`,
-      body: `Container and stream forensic analysis completed. ${obsText}`,
-      quote: null,
-      at: null,
-      kv: [
-        emb.camera_make || emb.camera_model ? ['Device / Camera', `${emb.camera_make || ''} ${emb.camera_model || ''}`.trim()] : null,
-        emb.software_used ? ['Creation Software', emb.software_used] : null,
-        emb.encoder_software || vStream.encoder ? ['Encoder', emb.encoder_software || vStream.encoder] : null,
-        vStream.codec_name && vStream.codec_name !== 'Unknown' ? ['Video Codec', vStream.codec_name.toUpperCase()] : null,
-        vStream.resolution && vStream.resolution !== 'Unknown' ? ['Resolution', vStream.resolution] : null,
-        vStream.frame_rate ? ['Frame Rate', `${vStream.frame_rate} fps`] : null,
-        ['Metadata Completeness', (metaForensics.completeness || 'low').toUpperCase()],
-        ['Provenance / Content Credentials', metaForensics.provenance_status || 'not_available'],
-      ].filter(Boolean),
-    });
-  }
-
-
-  if (sebi.prompt_injection_detected) {
-    push({
-      kind: 'Tampering', tier: 'critical', stage: 'Stage 05 · compliance',
-      title: 'Attempt to manipulate the compliance scanner',
-      body: 'The submitted content contained instructions aimed at the analysis model — telling it to ignore its rules or to report the content as safe. Legitimate media has no reason to address the scanner. FinGuard treats the attempt as a direct fraud indicator and escalates on it.',
-      quote: arr(sebi.credential_misrepresentation).find((q) => /adversarial|injection/i.test(q)) || null,
-      at: null,
-    });
-  }
-
-  if (visionScore !== null && visionScore >= 0.5) {
-    push({
-      kind: 'Visual', tier: visionScore >= 0.75 ? 'critical' : 'high', stage: 'Stage 02 · vision',
-      title: `Face regions scored ${(visionScore * 100).toFixed(1)}% for manipulation`,
-      body: `The peak-scoring frame exceeded the 50% manipulation threshold.${num(raw.vision_temporal_variance) !== null ? ` Score variance across sampled frames was ${raw.vision_temporal_variance.toFixed(4)} — high variance suggests the manipulation is not present throughout the clip.` : ''} The noise-residual heatmap below shows which regions drove the score.`,
-      quote: null, at: null,
-    });
-  }
-
-  if (impersonation.is_impersonation && impersonation.warning) {
-    push({
-      kind: 'Impersonation', tier: 'critical', stage: 'Stage 03 · audio',
-      title: `Possible voice clone of ${impersonation.target || 'a known name'}`,
-      body: `${impersonation.warning} A recognised finance personality is named in the speech while the voice itself scores as synthetic — the combination is the signature of a cloned-voice endorsement.`,
-      quote: null, at: null,
-    });
-  }
-
-  for (const seg of flaggedAudio) {
-    push({
-      kind: 'Voice', tier: (seg.score ?? 0) >= 0.75 ? 'high' : 'moderate', stage: 'Stage 03 · audio',
-      title: `Audio window scored ${Math.round((seg.score ?? 0) * 100)}% synthetic`,
-      body: `The window from ${fmtClock(seg.start)} to ${fmtClock(seg.end)} scored above the spoof threshold. Isolated windows can indicate a spliced insert rather than a wholly synthetic track — play the segment and listen for a change in room tone.`,
-      quote: null, at: num(seg.start),
-    });
-  }
-
+  // Quoted claims from transcript / OCR
   for (const group of CLAIM_GROUPS) {
     for (const quote of arr(sebi[group.field])) {
-      push({
-        kind: group.kind, tier: group.tier, stage: 'Stage 05 · compliance',
-        title: group.kind === 'Credentials' ? 'Credential claim flagged' : `${group.kind} language quoted`,
-        body: group.why, quote, at: clockFor(quote),
+      pushEvidence({
+        kind: isAmbiguous ? `${group.kind} (Under Review)` : group.kind,
+        tier: isAmbiguous ? 'moderate' : group.tier,
+        source: 'Transcript / OCR Analysis',
+        title: isAmbiguous ? `${group.kind} (Review Required)` : `${group.kind} detected`,
+        body: isAmbiguous
+          ? `Extracted claim under compliance review: ${group.why}`
+          : group.why,
+        quote: String(quote),
+        timestamp: clockFor(quote),
       });
     }
   }
 
-  if (reading.tier !== 'low' && reading.tier !== 'unknown') {
-    push({
-      kind: 'Registry', tier: reading.tier, stage: 'Stage 06 · registry',
-      title: reading.label,
-      body: reading.text,
-      quote: null, at: null,
-      kv: categories.find((c) => c.id === 'sebi').detail,
+  // Audio segments flagged
+  for (const seg of flaggedAudio) {
+    pushEvidence({
+      kind: 'AI Voice Segment',
+      tier: (seg.score ?? 0) >= 0.75 ? 'high' : 'moderate',
+      source: 'Audio Check',
+      title: `Audio part scored ${Math.round((seg.score ?? 0) * 100)}% AI-generated`,
+      body: 'This audio segment showed characteristics of AI-generated speech.',
+      quote: null,
+      timestamp: num(seg.start),
     });
   }
 
-  // Stage 9: Phishing domain findings
-  const domScan = raw.domain_scan || {};
-  if (domScan.is_phishing || (domScan.flagged_domains && domScan.flagged_domains.length)) {
-    push({
-      kind: 'Phishing Domain', tier: 'critical', stage: 'Stage 09 · domain',
-      title: `Suspicious domain: ${domScan.domain || (domScan.flagged_domains || [])[0]}`,
-      body: `Phishing domain threat detected. ${domScan.reason || 'Domain impersonates a registered stockbroker platform.'}`,
-      quote: null, at: null,
-      kv: [
-        ['Target Brand', domScan.closest_match || 'N/A'],
-        ['Risk Reason', domScan.reason || 'Impersonation'],
-      ],
+  // Visual frame manipulation
+  if (visionScore !== null && visionScore >= 0.50) {
+    pushEvidence({
+      kind: 'Visual Forensic Anomaly',
+      tier: visionScore >= 0.75 ? 'critical' : 'high',
+      source: 'Face Manipulation Detector',
+      title: `Face regions scored ${(visionScore * 100).toFixed(1)}% manipulation`,
+      body: 'Spatial and noise residuals on detected facial regions exceeded the deepfake detection threshold.',
+      quote: null,
+      timestamp: null,
     });
   }
 
-  // Stage 9: APK findings
-  const apkScan = raw.apk_analysis || {};
-  if (apkScan.suspicious || (apkScan.dangerous_permissions && apkScan.dangerous_permissions.length)) {
-    push({
-      kind: 'APK Forensics', tier: 'critical', stage: 'Stage 09 · apk',
-      title: `Rogue APK Threat: ${apkScan.package_name || 'Suspicious App'}`,
-      body: `APK package failed security checks. Flagged for dangerous permissions: ${(apkScan.dangerous_permissions || []).join(', ')}.`,
-      quote: null, at: null,
-      kv: [
-        ['Package Name', apkScan.package_name || 'N/A'],
-        ['Dangerous Permissions', String((apkScan.dangerous_permissions || []).length)],
-        ['Whitelisted Broker', apkScan.is_official_broker ? 'Yes' : 'No'],
-      ],
+  // Registry issues
+  if (registryInfo.tier === 'high' || registryInfo.tier === 'critical') {
+    pushEvidence({
+      kind: 'Registry Discrepancy',
+      tier: registryInfo.tier,
+      source: 'SEBI Registry Verification',
+      title: registryInfo.label,
+      body: registryInfo.text,
+      quote: null,
+      timestamp: null,
     });
   }
 
-  evidence.sort((a, b) => (TIERS[b.tier]?.rank ?? 0) - (TIERS[a.tier]?.rank ?? 0));
-
-  /* ── Transcript, flagged against the backend's own timeline ───────────── */
-  const flagByStart = new Map();
-  for (const entry of arr(raw.timeline_track)) {
-    if (entry.text_flag) flagByStart.set(Number(entry.start).toFixed(2), entry.text_flag);
+  // Network / Domain / APK threats
+  if (domScan.is_phishing || urlScan.is_phishing) {
+    pushEvidence({
+      kind: 'Phishing Threat',
+      tier: 'critical',
+      source: 'Domain Forensics',
+      title: `Suspicious domain: ${domScan.domain || urlScan.domain}`,
+      body: domScan.reason || urlScan.reason || 'Domain impersonates a registered stockbroker platform.',
+      quote: null,
+      timestamp: null,
+    });
   }
-  const FLAG_LABEL = {
-    explicit_return: 'Guaranteed return',
-    implied_return: 'Implied return',
-    urgency: 'Urgency',
-    paywall: 'Paywall push',
-  };
-  const FLAG_TIER = {
-    explicit_return: 'critical',
-    implied_return: 'high',
-    urgency: 'moderate',
-    paywall: 'moderate',
-  };
-  const transcript = arr(raw.segments).map((s) => {
-    const flag = flagByStart.get(Number(s.start).toFixed(2)) || null;
-    return {
-      start: num(s.start) ?? 0,
-      end: num(s.end) ?? 0,
-      text: String(s.text || ''),
-      flag,
-      flagLabel: flag ? FLAG_LABEL[flag] || flag : null,
-      flagTier: flag ? FLAG_TIER[flag] || 'moderate' : null,
-    };
-  });
 
-  /* ── Summary line ─────────────────────────────────────────────────────── */
-  const reasoning = String(sebi.reasoning || '').trim();
-  const summary = reasoning || fallbackSummary(tier, categories);
+  if (apkScan.suspicious || apkScan.is_suspicious) {
+    pushEvidence({
+      kind: 'Rogue APK Threat',
+      tier: 'critical',
+      source: 'APK Forensics',
+      title: `Suspicious application: ${apkScan.package_name || 'Rogue APK'}`,
+      body: apkScan.reason || 'Application requests dangerous permissions without official broker certification.',
+      quote: null,
+      timestamp: null,
+    });
+  }
 
-  const duration = audioSegments.length
-    ? Math.max(...audioSegments.map((s) => num(s.end) ?? 0))
-    : transcript.length
-      ? Math.max(...transcript.map((s) => s.end))
-      : null;
+  /* ── 7. Overall Summary Construction ──────────────────────────────────── */
+  let overallSummary = cleanDiagnosticTags(raw.overall_summary);
+  if (!overallSummary) {
+    const cleanedReasoning = cleanDiagnosticTags(sebi.reasoning);
+    if (isDeepfake && isScam) {
+      overallSummary = `High risk: Synthetic media detected alongside deceptive financial solicitations. ${cleanedReasoning}`;
+    } else if (isDeepfake) {
+      overallSummary = `Synthetic media detected by forensic detectors (${peakSignalLabel}: ${(peakSignal * 100).toFixed(0)}%). Spoken content contained no fraudulent claims: ${cleanedReasoning || 'General commentary with no high-risk SEBI violations flagged.'}`;
+    } else if (isScam) {
+      overallSummary = `Financial scam / SEBI regulatory violation flagged. Media showed no synthetic manipulation. ${cleanedReasoning}`;
+    } else if (tier.key === 'moderate') {
+      overallSummary = `Review recommended: The content or adviser credentials require independent verification. ${cleanedReasoning}`;
+    } else {
+      overallSummary = cleanedReasoning || 'No clear warning signs or synthetic manipulation were identified across the examined content.';
+    }
+  }
+
+  /* ── 8. Next Steps ─────────────────────────────────────────────────────── */
+  const nextSteps = generateNextSteps(isDeepfake, isScam, registryVerdict, hasNetworkThreats);
+
+  /* ── 9. Interactive Transcript ─────────────────────────────────────────── */
+  const transcriptSegments = arr(raw.segments).map((s) => ({
+    start: num(s.start) ?? 0,
+    end: num(s.end) ?? 0,
+    text: String(s.text || ''),
+  }));
 
   return {
     mode: meta.mode || raw.scan_type || 'video',
     jobId: meta.jobId || null,
-    filename: meta.filename || null,
+    filename: meta.filename || (meta.mode === 'text' ? 'Pasted Text' : 'Submitted Content'),
     startedAt: meta.startedAt || new Date(),
 
-    verdict: String(raw.verdict || 'Inconclusive'),
+    rawVerdict,
+    verdictLabel,
     tier,
+    isDegraded,
+    degradedModules,
+
     peakSignal,
-    signalInputs,
-    summary,
-    isDeepfake: Boolean(raw.is_deepfake),
+    peakSignalLabel,
+    overallSummary,
+
+    isDeepfake,
     isScam,
-    injectionDetected: Boolean(sebi.prompt_injection_detected),
 
-    categories,
+    // Distinct modalities
+    videoModality,
+    audioModality,
+    scamModality,
+    registryModality,
+    networkModality,
+
+    // Findings & Actions
     evidence,
-    transcript,
-    transcriptText: String(raw.transcript || ''),
-    timeline: arr(raw.timeline_track),
-    audioSegments,
-    duration,
+    nextSteps,
 
-    heatmap: raw.heatmap_base64 || null,
-    extractedText: raw.extracted_text || null,
-    ocrConfidence: num(raw.ocr_confidence),
-    complaint: raw.scores_complaint || null,
-    metadataForensics: raw.metadata_forensics || null,
+    // Media & Transcripts
+    transcript: transcriptSegments,
+    transcriptText: String(raw.transcript || ''),
+    segmentsAnalysis: arr(sebi.segments_analysis || raw.segments_analysis),
+    scoresComplaint: raw.scores_complaint || null,
 
     raw,
   };
 }
 
-function fallbackSummary(tier, categories) {
-  const flagged = categories.filter((c) => c.tier === 'high' || c.tier === 'critical');
-  if (!flagged.length) {
-    return tier.key === 'low'
-      ? 'No stage returned a signal above its threshold. Treat this as the absence of detected manipulation, not a guarantee of authenticity.'
-      : 'No single stage crossed its threshold, but the combined signals were high enough to warrant review.';
-  }
-  const names = flagged.map((c) => c.name.toLowerCase());
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-  return `Escalated on ${list}. Read the evidence below before acting on this media.`;
-}
+export const adaptJobResult = toViewModel;

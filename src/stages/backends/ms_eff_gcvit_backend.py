@@ -53,38 +53,48 @@ def preprocess_isotropic(img_bgr_or_rgb, target_size=(224, 224), is_bgr=True) ->
 
 class MsEffGCViTBackend(BaseVisionBackend):
     """
-    FaceForensics++ c23 fine-tuned detector:
-    - Architecture: MS-EffGCViT-B0 (8.9M params)
-    - Output: logit -> sigmoid(logit) = P(fake)
+    MS-EffGCViT-B0 Deepfake Detection Backend:
+    - Architecture: MS-EffGCViT-B0 (EfficientNet-B0 + GCViT Attention, 8.9M params)
+    - Active Production Detector: Original pretrained checkpoint from Hugging Face
+      (KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus: model.safetensors).
+    - Experimental Baseline / Rollback: Supports loading local fine-tuned checkpoints
+      (e.g., experiments/deepfake_finetune/checkpoints/best_checkpoint_weights.pth).
+    - Output Semantics: logit -> sigmoid(logit) = P(fake) in [0.0, 1.0].
     """
 
     def __init__(self, weights_path: str = None, model_id: str = "KoreaPeter/ms-eff-gcvit-deepfake-b0-ff-plus-plus", device: str = "cpu"):
         self._model_id = model_id
         self._device = device
+        self._is_finetuned = (weights_path is not None)
         self._model = None
 
         if weights_path is not None:
             if not os.path.isfile(weights_path):
                 raise FileNotFoundError(f"Checkpoint weights not found: {weights_path}")
+            resolved_weights_path = os.path.abspath(weights_path)
+            self._checkpoint_source = f"Local Fine-Tuned Checkpoint: {resolved_weights_path}"
         else:
             try:
                 from huggingface_hub import hf_hub_download
-                weights_path = hf_hub_download(repo_id=model_id, filename="model.safetensors")
+                resolved_weights_path = hf_hub_download(repo_id=model_id, filename="model.safetensors")
+                self._checkpoint_source = f"Original Pretrained Hugging Face ({model_id}: model.safetensors)"
             except Exception as ex:
                 raise FileNotFoundError(f"Failed to locate or download weights for {model_id}: {ex}")
 
-        if not os.path.isfile(weights_path):
-            raise FileNotFoundError(f"Checkpoint weights not found: {weights_path}")
+        if not os.path.isfile(resolved_weights_path):
+            raise FileNotFoundError(f"Checkpoint weights not found: {resolved_weights_path}")
+
+        self._weights_path = resolved_weights_path
 
         # Instantiate architecture
         self._model = ms_eff_gcvit_b0(pretrained=False, dataset="ff++")
 
         # Load weights
-        if weights_path.endswith(".safetensors"):
+        if resolved_weights_path.endswith(".safetensors"):
             from safetensors.torch import load_file
-            state_dict = load_file(weights_path)
+            state_dict = load_file(resolved_weights_path)
         else:
-            state_dict = torch.load(weights_path, map_location="cpu")
+            state_dict = torch.load(resolved_weights_path, map_location="cpu")
 
         # Strip "model." prefix if loaded from HuggingFace PreTrainedModel wrapper
         clean_sd = {k.replace("model.", ""): v for k, v in state_dict.items() if k.startswith("model.")}
@@ -94,6 +104,7 @@ class MsEffGCViTBackend(BaseVisionBackend):
         self._model.load_state_dict(clean_sd, strict=True)
         self._model.to(device)
         self._model.eval()
+        print(f"[MS-EffGCViT] Loaded model '{self._model_id}' on {self._device}. Source: {self._checkpoint_source}. Fine-tuned: {self._is_finetuned}")
 
     @property
     def backend_name(self) -> str:
@@ -102,6 +113,18 @@ class MsEffGCViTBackend(BaseVisionBackend):
     @property
     def model_id(self) -> str:
         return self._model_id
+
+    @property
+    def weights_path(self) -> str:
+        return self._weights_path
+
+    @property
+    def is_finetuned(self) -> bool:
+        return self._is_finetuned
+
+    @property
+    def checkpoint_source(self) -> str:
+        return self._checkpoint_source
 
     def predict_frame(self, frame_path_or_img) -> float:
         if isinstance(frame_path_or_img, str):

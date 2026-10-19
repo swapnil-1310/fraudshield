@@ -21,6 +21,12 @@ def load_config():
 # Global config object
 settings = load_config()
 
+def reload_config():
+    """Reloads settings directly from config.yaml."""
+    global settings
+    settings = load_config()
+    return settings
+
 # Helper accessors
 def get_device():
     if settings.get("hardware", {}).get("force_cpu", False):
@@ -37,6 +43,9 @@ def get_device():
 
 def get_vision_detector_config() -> dict:
     return settings.get("vision_detector", {})
+
+def get_audio_detector_config() -> dict:
+    return settings.get("audio_detector", {})
 
 def get_vision_threshold() -> float:
     det_cfg = get_vision_detector_config()

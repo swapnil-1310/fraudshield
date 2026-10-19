@@ -1,330 +1,816 @@
-import { $, $$, clear, el, esc, fmtBytes, fmtClock, fmtScore, fmtStamp, fitCanvas, reducedMotion, whileVisible } from './dom.js';
-import { LIMITS, complaintUrl, health, startRun, validateFile, validateText } from './api.js';
-import { planFor, TECHNOLOGY_STAGES } from './stages.js';
+/* ============================================================================
+   FinGuard Main Application Controller
+   ----------------------------------------------------------------------------
+   Implements:
+     - SPA Routing (/, /how-it-works, /features, /technology, /analyze, /analysis, /results)
+     - Responsive Banking Navigation & Health Monitoring
+     - Multi-Modal Form Handlers (Video, Audio, Image, Text, URL, APK)
+     - 3D Security Shield Loading Scene & 18 Rotating Scam-Awareness Tips
+     - Structured Result Presentation with Strict Modality Separation
+   ========================================================================= */
+
+import { $, $$, esc, fmtBytes, fmtClock, fmtScore, fmtStamp, reducedMotion } from './dom.js';
+import { LIMITS, complaintUrl, health, startRun, validateFile, validateText, validateUrl } from './api.js';
+import { planFor } from './stages.js';
 import { toViewModel } from './model.js';
 
+/* ── Application State ───────────────────────────────────────────────────── */
+
 const state = {
-  route: ['/', '/analyze', '/analysis', '/results'].includes(window.location.pathname) ? window.location.pathname : '/',
+  route: getInitialRoute(),
   mode: 'video',
   file: null,
   previewUrl: null,
   text: '',
+  urlText: '',
   run: null,
   startedAt: null,
   jobId: null,
   viewModel: null,
+  tipIndex: 0,
+  tipTimer: null,
 };
 
-const icons = {
-  check: '<path d="m5 12 4 4L19 6"/>',
-  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
-  chevron: '<path d="m6 9 6 6 6-6"/>',
-  upload: '<path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 15v4h16v-4"/>',
-  shield: '<path d="M12 2.5 4.5 5.6v5.9c0 4.7 3.1 8.6 7.5 10 4.4-1.4 7.5-5.3 7.5-10V5.6Z"/><path d="m8.6 12.1 3.4 3.3 3.4-5.6"/>',
-};
-const svg = (body, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+function getInitialRoute() {
+  const path = window.location.pathname;
+  const validRoutes = ['/', '/how-it-works', '/features', '/technology', '/analyze', '/analysis', '/results'];
+  return validRoutes.includes(path) ? path : '/';
+}
+
+/* ── 18 Comprehensive Scam-Awareness Tips ────────────────────────────────── */
+
+const SCAM_TIPS = [
+  'Never share your OTP, even with someone claiming to be from your bank or regulatory authority.',
+  'A promise of guaranteed high or fixed market returns is an immediate warning sign of investment fraud.',
+  'Never transfer money to unlock a frozen investment withdrawal or pay an advance fee.',
+  'Always check investment adviser claims through official SEBI sources at sebi.gov.in before investing.',
+  'A familiar face or voice does not prove that a video or call is genuine. AI cloning is widely used by scammers.',
+  'Never enter your UPI PIN to receive money. A PIN is required only when transferring funds out.',
+  'Check website URLs carefully before entering financial details. Scammers create realistic lookalike domains.',
+  'A genuine person can promote an unregistered scam, and AI-generated content can also be completely harmless.',
+  'Legitimate investment advisers never ask for your Demat trading account password or authentication credentials.',
+  'Be cautious of investment opportunities offered exclusively through private WhatsApp or Telegram groups.',
+  'Government regulators and law enforcement agencies never demand instant funds transfers over the phone.',
+  'High pressure to act immediately is one of the most common psychological tactics used in financial scams.',
+  'Verify SEBI registration numbers on the official SEBI intermediary database before making commitments.',
+  'Never install remote-access apps (such as AnyDesk or TeamViewer) at the request of an unknown caller.',
+  'If an investment offer sounds too good to be true, pause and consult an independent registered professional.',
+  'Deepfake audio can realistically mimic family members, corporate executives, or famous market commentators.',
+  'Real stock exchanges and depositories never hold investor funds in personal savings accounts.',
+  'Report financial cyber fraud immediately to the National Cyber Crime Portal at cybercrime.gov.in or helpline 1930.',
+];
+
+/* ── Routing & Navigation ────────────────────────────────────────────────── */
 
 function showRoute(route) {
   state.route = route;
-  history.pushState({}, '', route);
+  if (window.location.pathname !== route) {
+    history.pushState({}, '', route);
+  }
+
+  // View visibility
   $('#view-landing').hidden = route !== '/';
+  $('#view-how').hidden = route !== '/how-it-works';
+  $('#view-features').hidden = route !== '/features';
+  $('#view-technology').hidden = route !== '/technology';
   $('#view-analyze').hidden = route !== '/analyze';
   $('#view-analysis').hidden = route !== '/analysis';
   $('#view-results').hidden = route !== '/results';
-  $('.fg-footer').hidden = route === '/analysis';
-  if (route === '/') window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
-  if (route === '/analyze') renderWork();
-  if (route === '/results' && state.viewModel) renderResults(state.viewModel);
-  closeMenu();
-}
 
-function closeMenu() {
-  const nav = $('#nav');
-  nav.dataset.open = 'false';
-  $('#nav-toggle')?.setAttribute('aria-expanded', 'false');
-}
+  // Highlight active nav links
+  $$('.fg-nav__link').forEach((link) => {
+    link.classList.toggle('fg-nav__link--active', link.dataset.route === route);
+  });
 
-function goAnchor(id) {
-  if (state.route !== '/') {
-    showRoute('/');
-    requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' }));
-  } else document.getElementById(id)?.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth' });
-  closeMenu();
+  // Close mobile drawer
+  $('#nav-header').removeAttribute('data-mobile-open');
+
+  // Route-specific triggers
+  if (route === '/analyze') {
+    renderWorkspace();
+  } else if (route === '/results' && state.viewModel) {
+    renderReport(state.viewModel);
+  }
+
+  window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
 }
 
 function bindNavigation() {
-  document.addEventListener('click', (event) => {
-    const route = event.target.closest('[data-route]')?.dataset.route;
-    const anchor = event.target.closest('[data-anchor]')?.dataset.anchor;
-    if (route) showRoute(route);
-    else if (anchor) goAnchor(anchor);
+  document.addEventListener('click', (e) => {
+    const routeTarget = e.target.closest('[data-route]');
+    if (routeTarget) {
+      e.preventDefault();
+      showRoute(routeTarget.dataset.route);
+    }
   });
-  window.addEventListener('popstate', () => showRoute(window.location.pathname === '/analyze' ? '/analyze' : '/'));
-  window.addEventListener('scroll', () => { $('#nav').dataset.scrolled = window.scrollY > 8 ? 'true' : 'false'; }, { passive: true });
-  $('#nav-toggle')?.addEventListener('click', () => {
-    const open = $('#nav').dataset.open !== 'true';
-    $('#nav').dataset.open = open ? 'true' : 'false';
-    $('#nav-toggle').setAttribute('aria-expanded', String(open));
+
+  window.addEventListener('popstate', () => {
+    showRoute(getInitialRoute());
   });
-}
 
-function initIntro() {
-  const intro = $('#intro');
-  const video = $('#intro-video');
-  if (!intro || sessionStorage.getItem('fingaurdIntroSeen') === 'true') return;
-  const desktop = '/static/videos/fingaurd-intro-desktop.mp4';
-  const mobile = '/static/videos/fingaurd-intro-mobile.mp4';
-  const source = window.matchMedia('(max-width: 768px)').matches ? mobile : desktop;
-  let finished = false;
-  const leave = () => {
-    if (finished) return;
-    finished = true;
-    sessionStorage.setItem('fingaurdIntroSeen', 'true');
-    video.pause();
-    intro.dataset.handoff = 'true';
-    setTimeout(() => { intro.dataset.leaving = 'true'; document.body.dataset.locked = 'false'; }, reducedMotion() ? 0 : 250);
-    setTimeout(() => { intro.hidden = true; }, reducedMotion() ? 10 : 900);
-  };
-  video.src = source;
-  intro.hidden = false;
-  document.body.dataset.locked = 'true';
-  $('#intro-skip').addEventListener('click', leave);
-  video.addEventListener('timeupdate', () => { $('#intro-rule').style.width = `${video.duration ? video.currentTime / video.duration * 100 : 0}%`; });
-  video.addEventListener('ended', leave);
-  video.addEventListener('error', leave, { once: true });
-  video.play().catch(leave);
-}
-
-function setHealth() {
-  health().then((data) => {
-    $('#health').dataset.state = 'online';
-    $('#health-text').textContent = data.status === 'ok' ? 'Service online' : 'Service ready';
-  }).catch(() => {
-    $('#health').dataset.state = 'offline';
-    $('#health-text').textContent = 'Service offline';
-  });
-}
-
-function renderWork() {
-  const slot = $('#work-slot');
-  const plan = planFor(state.mode);
-  $('#rail-title').textContent = state.mode === 'text' ? 'What this run will do' : 'What this scan will do';
-  $('#rail-list').innerHTML = plan.map((stage, index) => `<li class="fg-rail__item"><span class="fg-rail__idx">${String(index + 1).padStart(2, '0')}</span><p><b>${esc(stage.label)}</b><br>${esc(stage.sub)}</p></li>`).join('');
-  $$('.fg-mode').forEach((button) => button.setAttribute('aria-selected', String(button.dataset.mode === state.mode)));
-  if (state.mode === 'text') {
-    slot.innerHTML = `<div class="fg-panel"><div class="fg-panel__body"><label class="fg-sr" for="scan-text">Text to analyse</label><textarea class="fg-textarea" id="scan-text" placeholder="Paste a financial message, claim, or social post..."></textarea><div class="fg-count"><span>Compliance reasoning input</span><span id="text-count">0 characters</span></div><div class="fg-file__actions" style="margin-top:1rem"><button class="fg-btn fg-file__go" id="text-start" type="button">Analyse text ${svg(icons.arrow, 'fg-btn__arrow')}</button></div></div></div>`;
-    const textarea = $('#scan-text');
-    textarea.value = state.text;
-    textarea.addEventListener('input', () => { state.text = textarea.value; $('#text-count').textContent = `${state.text.length} characters`; });
-    $('#text-start').addEventListener('click', () => { const check = validateText(state.text); if (!check.ok) return showError(check.message); startAnalysis(); });
-    return;
-  }
-  if (state.mode === 'url') {
-    slot.innerHTML = `<div class="fg-panel"><div class="fg-panel__body"><label class="fg-sr" for="scan-url">URL to audit</label><textarea class="fg-textarea" id="scan-url" style="min-height:70px;height:70px;padding:0.75rem 1rem;resize:none;" placeholder="https://groww-bonus-reward.xyz/login"></textarea><div class="fg-count"><span>Phishing & domain typosquatting check</span><span id="url-count">0 characters</span></div><div class="fg-file__actions" style="margin-top:1rem"><button class="fg-btn fg-file__go" id="url-start" type="button">Audit URL ${svg(icons.arrow, 'fg-btn__arrow')}</button></div></div></div>`;
-    const urlInput = $('#scan-url');
-    urlInput.value = state.urlText || '';
-    urlInput.addEventListener('input', () => { state.urlText = urlInput.value; $('#url-count').textContent = `${state.urlText.length} characters`; });
-    $('#url-start').addEventListener('click', () => {
-      const val = (state.urlText || '').trim();
-      if (!val || (!val.startsWith('http://') && !val.startsWith('https://') && !val.includes('.'))) {
-        return showError('Enter a valid URL to audit (e.g. https://kite.zerodha.com).');
+  // Mobile menu toggle
+  const toggleBtn = $('#nav-toggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const header = $('#nav-header');
+      const isOpen = header.getAttribute('data-mobile-open') === 'true';
+      if (isOpen) {
+        header.removeAttribute('data-mobile-open');
+      } else {
+        header.setAttribute('data-mobile-open', 'true');
       }
-      clearError();
-      startAnalysis();
+    });
+  }
+}
+
+/* ── Service Health Check ────────────────────────────────────────────────── */
+
+function monitorHealth() {
+  const healthPill = $('#health');
+  const healthText = $('#health-text');
+
+  health()
+    .then((data) => {
+      if (data && data.status === 'ok') {
+        healthPill.dataset.state = 'online';
+        healthText.textContent = 'System Online';
+      } else {
+        healthPill.dataset.state = 'online';
+        healthText.textContent = 'Service Ready';
+      }
+    })
+    .catch(() => {
+      healthPill.dataset.state = 'offline';
+      healthText.textContent = 'Service Offline';
+    });
+}
+
+/* ── Analysis Workspace (Forms & Inputs) ─────────────────────────────────── */
+
+function renderWorkspace() {
+  const slot = $('#workspace-slot');
+  const plan = planFor(state.mode);
+
+  // Update sidebar stages list
+  $('#sidebar-plan-title').textContent = `${state.mode.toUpperCase()} Inspection Plan`;
+  $('#sidebar-stages-list').innerHTML = plan
+    .map((stage, idx) => `
+      <li class="fg-stages-list__item">
+        <span class="fg-stages-list__idx">${String(idx + 1).padStart(2, '0')}</span>
+        <div class="fg-stages-list__text">
+          <b>${esc(stage.label)}</b>
+          <span>${esc(stage.sub)}</span>
+        </div>
+      </li>
+    `)
+    .join('');
+
+  // Update tab selection
+  $$('.fg-tab').forEach((tab) => {
+    tab.setAttribute('aria-selected', String(tab.dataset.mode === state.mode));
+  });
+
+  clearWorkspaceError();
+
+  // Mode: Text
+  if (state.mode === 'text') {
+    slot.innerHTML = `
+      <div class="fg-input-box">
+        <label for="text-input" style="font-weight:600;font-size:0.875rem;display:block;margin-bottom:0.4rem;">
+          Financial Message or Claim Text
+        </label>
+        <textarea class="fg-textarea" id="text-input" placeholder="Paste a financial message, social media tip, or claimed investment guarantee here...">${esc(state.text)}</textarea>
+        <div class="fg-counter-row">
+          <span>Minimum 5 characters for compliance analysis</span>
+          <span id="text-counter">${state.text.length} characters</span>
+        </div>
+        <div style="margin-top:1.25rem;display:flex;justify-content:flex-end;">
+          <button class="fg-btn" id="submit-text-btn" type="button">
+            Analyze Text
+          </button>
+        </div>
+      </div>
+    `;
+
+    const textarea = $('#text-input');
+    textarea.addEventListener('input', () => {
+      state.text = textarea.value;
+      $('#text-counter').textContent = `${state.text.length} characters`;
+    });
+
+    $('#submit-text-btn').addEventListener('click', () => {
+      const check = validateText(state.text);
+      if (!check.ok) return showWorkspaceError(check.message);
+      clearWorkspaceError();
+      launchAnalysis();
     });
     return;
   }
-  const accept = (LIMITS[state.mode] || []).join(',');
-  const dropDesc = state.mode === 'apk' ? 'Drop an Android .apk package file here, or browse your device.' : `Drop a ${state.mode} file here, or browse your device.`;
-  slot.innerHTML = `<label class="fg-drop" id="drop" for="file-input"><input class="fg-drop__input" id="file-input" type="file" accept="${accept}"><span class="fg-drop__inner"><span class="fg-drop__mark">${svg(icons.upload)}</span><strong class="fg-drop__title">Upload ${state.mode === 'apk' ? 'APK package' : 'media'} for analysis</strong><span class="fg-drop__text">${dropDesc}</span><span class="fg-drop__formats">${(LIMITS[state.mode] || []).map((item) => `<span class="fg-drop__format">${item.slice(1)}</span>`).join('')}</span><span class="fg-drop__limit">Maximum 100 MB</span></span></label>`;
-  const input = $('#file-input');
-  const drop = $('#drop');
-  input.addEventListener('change', () => chooseFile(input.files[0]));
-  ['dragenter', 'dragover'].forEach((type) => drop.addEventListener(type, (event) => { event.preventDefault(); drop.dataset.dragging = 'true'; }));
-  ['dragleave', 'drop'].forEach((type) => drop.addEventListener(type, (event) => { event.preventDefault(); drop.dataset.dragging = 'false'; }));
-  drop.addEventListener('drop', (event) => chooseFile(event.dataTransfer.files[0]));
-  if (state.file) renderFile();
-}
 
-function chooseFile(file) {
-  const check = validateFile(state.mode, file);
-  if (!check.ok) return showError(check.message);
-  clearError();
-  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
-  state.file = file;
-  state.previewUrl = file.type.startsWith('video/') || file.type.startsWith('audio/') || file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
-  renderFile();
-}
+  // Mode: URL
+  if (state.mode === 'url') {
+    slot.innerHTML = `
+      <div class="fg-input-box">
+        <label for="url-input" style="font-weight:600;font-size:0.875rem;display:block;margin-bottom:0.4rem;">
+          Website Address or Domain
+        </label>
+        <input class="fg-input-url" id="url-input" type="url" placeholder="https://example-broker.com" value="${esc(state.urlText)}">
+        <div class="fg-counter-row">
+          <span>Checks against registered SEBI broker domains and known phishing signatures</span>
+          <span id="url-counter">${state.urlText.length} characters</span>
+        </div>
+        <div style="margin-top:1.25rem;display:flex;justify-content:flex-end;">
+          <button class="fg-btn" id="submit-url-btn" type="button">
+            Audit URL
+          </button>
+        </div>
+      </div>
+    `;
 
-function renderFile() {
-  if (!state.file) return;
-  const media = state.mode === 'video'
-    ? `<video src="${state.previewUrl}" controls muted></video>`
-    : state.mode === 'audio'
-      ? `<audio src="${state.previewUrl}" controls></audio>`
-      : state.mode === 'image'
-        ? `<img src="${state.previewUrl}" alt="Selected image preview">`
-        : `<div class="fg-media__empty" style="padding:2rem 1rem;font-weight:600;">Android APK Package: ${esc(state.file.name)}</div>`;
-  $('#work-slot').innerHTML = `<div class="fg-file"><div class="fg-file__preview">${media}</div><div class="fg-file__meta"><div class="fg-file__cell"><span class="fg-file__key">File</span><span class="fg-file__val" title="${esc(state.file.name)}">${esc(state.file.name)}</span></div><div class="fg-file__cell"><span class="fg-file__key">Type</span><span class="fg-file__val">${state.mode.toUpperCase()}</span></div><div class="fg-file__cell"><span class="fg-file__key">Size</span><span class="fg-file__val">${fmtBytes(state.file.size)}</span></div></div><div class="fg-file__actions"><button class="fg-btn fg-btn--ghost" id="remove-file" type="button">Remove</button><button class="fg-btn fg-file__go" id="start-file" type="button">Start analysis ${svg(icons.arrow, 'fg-btn__arrow')}</button></div></div>`;
-  $('#remove-file').addEventListener('click', () => { state.file = null; renderWork(); });
-  $('#start-file').addEventListener('click', startAnalysis);
-}
+    const urlInput = $('#url-input');
+    urlInput.addEventListener('input', () => {
+      state.urlText = urlInput.value;
+      $('#url-counter').textContent = `${state.urlText.length} characters`;
+    });
 
-function showError(message) { const node = $('#work-error'); node.hidden = false; node.className = 'fg-notice'; node.innerHTML = `${svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3h.01">')}<span>${esc(message)}</span>`; }
-function clearError() { const node = $('#work-error'); node.hidden = true; node.textContent = ''; }
+    $('#submit-url-btn').addEventListener('click', () => {
+      const check = validateUrl(state.urlText);
+      if (!check.ok) return showWorkspaceError(check.message);
+      clearWorkspaceError();
+      launchAnalysis();
+    });
+    return;
+  }
 
-function startAnalysis() {
-  if (state.run) state.run.cancel();
-  state.startedAt = new Date();
-  state.jobId = null;
-  state.viewModel = null;
-  showRoute('/analysis');
-  const payload = state.mode === 'text' ? state.text : state.mode === 'url' ? state.urlText : state.file;
-  const plan = planFor(state.mode);
-  const displayName = state.mode === 'text' ? 'Pasted text' : state.mode === 'url' ? state.urlText : state.file.name;
-  setupAnalysis(plan, displayName);
-  state.run = startRun(state.mode, payload, {
-    onJob: (jobId) => { state.jobId = jobId; },
-    onStage: (index, status) => updateStage(index, status, plan),
-    onProgress: (fraction) => updateProgress(fraction),
-    onStatus: (text) => { $('#core-status').textContent = text; $('#prog-label').textContent = text; },
-    onDone: (raw) => finishAnalysis(raw),
-    onError: (error) => failAnalysis(error),
+  // Modes: Video, Audio, Image, APK
+  if (state.file) {
+    // Render selected file details
+    slot.innerHTML = `
+      <div class="fg-selected-file">
+        <div class="fg-selected-file__meta">
+          <div>
+            <div class="fg-selected-file__label">Selected File</div>
+            <div class="fg-selected-file__val" title="${esc(state.file.name)}">${esc(state.file.name)}</div>
+          </div>
+          <div>
+            <div class="fg-selected-file__label">Content Type</div>
+            <div class="fg-selected-file__val">${state.mode.toUpperCase()}</div>
+          </div>
+          <div>
+            <div class="fg-selected-file__label">File Size</div>
+            <div class="fg-selected-file__val">${fmtBytes(state.file.size)}</div>
+          </div>
+        </div>
+        <div class="fg-selected-file__actions">
+          <button class="fg-btn fg-btn--secondary" id="replace-file-btn" type="button">
+            Replace File
+          </button>
+          <button class="fg-btn fg-btn--secondary" id="remove-file-btn" type="button">
+            Remove
+          </button>
+          <button class="fg-btn" id="submit-file-btn" type="button">
+            Analyze Now
+          </button>
+        </div>
+      </div>
+    `;
+
+    $('#replace-file-btn').addEventListener('click', () => {
+      state.file = null;
+      renderWorkspace();
+    });
+
+    $('#remove-file-btn').addEventListener('click', () => {
+      state.file = null;
+      renderWorkspace();
+    });
+
+    $('#submit-file-btn').addEventListener('click', () => {
+      launchAnalysis();
+    });
+    return;
+  }
+
+  // Render dropzone
+  const allowed = (LIMITS[state.mode] || []).join(', ');
+  const modeLabel = state.mode === 'apk' ? 'Android APK package' : `${state.mode} file`;
+
+  slot.innerHTML = `
+    <label class="fg-dropzone" id="file-dropzone" for="file-upload">
+      <input class="fg-dropzone__input" id="file-upload" type="file" accept="${LIMITS[state.mode]?.join(',')}">
+      <svg class="fg-dropzone__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <div class="fg-dropzone__title">Select or drag a ${modeLabel}</div>
+      <div class="fg-dropzone__desc">Click to browse your device or drag and drop your file here</div>
+      <div class="fg-dropzone__formats">
+        ${(LIMITS[state.mode] || []).map((ext) => `<span class="fg-dropzone__pill">${ext.toUpperCase().replace('.', '')}</span>`).join('')}
+      </div>
+      <div class="fg-dropzone__limit">Maximum allowed file size: 100 MB</div>
+    </label>
+  `;
+
+  const fileInput = $('#file-upload');
+  const dropzone = $('#file-dropzone');
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) {
+      handleSelectedFile(fileInput.files[0]);
+    }
+  });
+
+  ['dragenter', 'dragover'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropzone.dataset.dragging = 'true';
+    });
+  });
+
+  ['dragleave', 'drop'].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropzone.dataset.dragging = 'false';
+    });
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleSelectedFile(e.dataTransfer.files[0]);
+    }
   });
 }
 
-function setupAnalysis(plan, filename) {
-  $('#analysis').dataset.done = 'false';
-  $('#core-file').textContent = filename;
-  $('#pipe-list').innerHTML = plan.map((stage) => `<li class="fg-stage" data-state="waiting"><span class="fg-stage__marker">${svg('')}</span><span><span class="fg-stage__label">${esc(stage.label)}</span><span class="fg-stage__sub">${esc(stage.sub)}</span></span></li>`).join('');
-  $('#pipe-count').textContent = `0 / ${plan.length}`;
-  $('#pipe-note').textContent = state.mode === 'video' ? 'Live stage state from the analysis service.' : 'Stage timing is estimated while the synchronous scan runs.';
-  $('#prog-fill').style.width = '0%'; $('#prog-pct').textContent = '0%'; $('#prog-label').textContent = 'Preparing analysis'; $('#core-status').textContent = 'Preparing analysis';
-  setupTipRotation(plan);
-  animateCore($('#core-canvas'), 'core');
+function handleSelectedFile(file) {
+  const check = validateFile(state.mode, file);
+  if (!check.ok) {
+    return showWorkspaceError(check.message);
+  }
+  clearWorkspaceError();
+
+  if (state.previewUrl) {
+    URL.revokeObjectURL(state.previewUrl);
+  }
+
+  state.file = file;
+  if (file.type.startsWith('video/') || file.type.startsWith('audio/') || file.type.startsWith('image/')) {
+    state.previewUrl = URL.createObjectURL(file);
+  } else {
+    state.previewUrl = null;
+  }
+
+  renderWorkspace();
 }
 
-function updateStage(index, status, plan) {
-  const items = $$('.fg-stage');
-  if (!items[index]) return;
-  items[index].dataset.state = status === 'failed' ? 'failed' : status;
-  items[index].querySelector('.fg-stage__marker').innerHTML = status === 'done' ? svg(icons.check) : status === 'active' ? '<span class="fg-stage__dot"></span>' : svg('');
-  const done = items.filter((item) => item.dataset.state === 'done').length;
-  $('#pipe-count').textContent = `${done} / ${plan.length}`;
+function showWorkspaceError(msg) {
+  const errBox = $('#workspace-error');
+  errBox.hidden = false;
+  errBox.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+    <span>${esc(msg)}</span>
+  `;
 }
 
-function updateProgress(fraction) {
-  const percent = Math.round(fraction * 100);
-  $('#prog-fill').style.width = `${percent}%`; $('#prog-pct').textContent = `${percent}%`; $('#core-pct').innerHTML = `${percent}<sup>%</sup>`;
-  $('#prog-track').setAttribute('aria-valuenow', String(percent));
+function clearWorkspaceError() {
+  const errBox = $('#workspace-error');
+  errBox.hidden = true;
+  errBox.textContent = '';
 }
 
-function setupTipRotation(plan) {
-  const tips = [
-    ['Pro tip', 'Pause before you act. Scammers often create urgency to stop you verifying the claim.', 'low'],
-    ['Fraud alert', 'Guaranteed returns and limited-time offers deserve independent verification.', 'moderate'],
-    ['Deepfake awareness', 'A realistic face or voice does not guarantee that the identity is authentic.', 'high'],
-    ['What we are checking', `The pipeline is currently checking ${plan[0]?.sub.toLowerCase() || 'the submitted media'}.`, 'low'],
-  ];
-  let index = 0;
-  const paint = () => { const tip = $('#tip'); tip.dataset.swap = 'true'; setTimeout(() => { const item = tips[index % tips.length]; $('#tip-kind').textContent = item[0]; $('#tip-title').textContent = item[0] === 'What we are checking' ? 'Pipeline signal' : item[0]; $('#tip-text').textContent = item[1]; tip.dataset.tier = item[2]; $('#tip-dots').innerHTML = tips.map((_, i) => `<span class="fg-tip__dot" data-on="${i === index % tips.length}"></span>`).join(''); tip.dataset.swap = 'false'; index += 1; }, reducedMotion() ? 0 : 260); };
-  paint();
-  clearInterval(state.tipTimer); state.tipTimer = setInterval(paint, 6000);
+/* ── Analysis Execution & Loading Orchestration ──────────────────────────── */
+
+function launchAnalysis() {
+  if (state.run) {
+    state.run.cancel();
+  }
+
+  state.startedAt = new Date();
+  state.jobId = null;
+  state.viewModel = null;
+
+  showRoute('/analysis');
+
+  const payload = state.mode === 'text'
+    ? state.text
+    : state.mode === 'url'
+      ? state.urlText
+      : state.file;
+
+  const displayName = state.mode === 'text'
+    ? 'Pasted Financial Text'
+    : state.mode === 'url'
+      ? state.urlText
+      : state.file ? state.file.name : 'Submitted Content';
+
+  $('#loading-filename').textContent = displayName;
+
+  // Set up loading screen state
+  const isVideo = state.mode === 'video';
+  const track = $('#loading-track');
+  const bar = $('#loading-bar');
+  const statusText = $('#loading-status-text');
+
+  if (isVideo) {
+    track.dataset.indeterminate = 'false';
+    bar.style.width = '0%';
+    statusText.textContent = 'Securing media and extracting frames...';
+  } else {
+    // Synchronous requests have indeterminate progress
+    track.dataset.indeterminate = 'true';
+    bar.style.width = '40%';
+    statusText.textContent = 'Executing forensic analysis...';
+  }
+
+  startTipRotation();
+
+  // Cancel button
+  $('#cancel-analysis-btn').onclick = () => {
+    if (state.run) state.run.cancel();
+    stopTipRotation();
+    showRoute('/analyze');
+  };
+
+  // Launch the analysis run via api.js
+  state.run = startRun(state.mode, payload, {
+    onJob: (jobId) => {
+      state.jobId = jobId;
+    },
+    onProgress: (fraction) => {
+      if (isVideo) {
+        const pct = Math.round(fraction * 100);
+        bar.style.width = `${pct}%`;
+        track.setAttribute('aria-valuenow', String(pct));
+      }
+    },
+    onStatus: (text) => {
+      statusText.textContent = text;
+    },
+    onDone: (result) => {
+      stopTipRotation();
+      handleAnalysisSuccess(result);
+    },
+    onError: (err) => {
+      stopTipRotation();
+      handleAnalysisError(err);
+    },
+  });
 }
 
-function finishAnalysis(raw) {
+function handleAnalysisSuccess(result) {
+  try {
+    state.viewModel = toViewModel(result, {
+      mode: state.mode,
+      filename: state.mode === 'text'
+        ? 'Pasted Text'
+        : state.mode === 'url'
+          ? state.urlText
+          : state.file ? state.file.name : 'Submitted Content',
+      jobId: state.jobId,
+      size: state.file ? state.file.size : null,
+      startedAt: state.startedAt,
+    });
+    showRoute('/results');
+  } catch (err) {
+    console.error('Error assembling view model:', err);
+    showRoute('/analyze');
+    showWorkspaceError('An error occurred while formatting the analysis results.');
+  }
+}
+
+function handleAnalysisError(err) {
+  showRoute('/analyze');
+  const msg = err?.message || 'The analysis service could not complete your request. Please try again.';
+  showWorkspaceError(msg);
+}
+
+/* ── Scam Awareness Tips Rotation ────────────────────────────────────────── */
+
+function startTipRotation() {
+  state.tipIndex = 0;
+  displayCurrentTip();
+
   clearInterval(state.tipTimer);
-  updateProgress(1);
-  $('#analysis').dataset.done = 'true';
-  $('#core-status').textContent = 'Analysis complete';
-  setTimeout(() => {
-    try {
-      state.viewModel = toViewModel(raw, {
-        mode: state.mode,
-        filename: state.mode === 'text' ? 'Pasted text' : state.file?.name,
-        jobId: state.jobId,
-        size: state.file?.size,
-        startedAt: state.startedAt,
+  state.tipTimer = setInterval(() => {
+    state.tipIndex = (state.tipIndex + 1) % SCAM_TIPS.length;
+    displayCurrentTip();
+  }, 5000);
+
+  // Manual prev/next navigation
+  $('#tip-prev-btn').onclick = () => {
+    state.tipIndex = (state.tipIndex - 1 + SCAM_TIPS.length) % SCAM_TIPS.length;
+    displayCurrentTip();
+  };
+
+  $('#tip-next-btn').onclick = () => {
+    state.tipIndex = (state.tipIndex + 1) % SCAM_TIPS.length;
+    displayCurrentTip();
+  };
+}
+
+function stopTipRotation() {
+  if (state.tipTimer) {
+    clearInterval(state.tipTimer);
+    state.tipTimer = null;
+  }
+}
+
+function displayCurrentTip() {
+  const tipContent = $('#tip-content');
+  const tipCounter = $('#tip-counter');
+  if (tipContent && tipCounter) {
+    tipContent.style.opacity = '0';
+    setTimeout(() => {
+      tipContent.textContent = SCAM_TIPS[state.tipIndex];
+      tipCounter.textContent = `Tip ${state.tipIndex + 1} of ${SCAM_TIPS.length}`;
+      tipContent.style.opacity = '1';
+    }, 150);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RESULTS & FORENSIC REPORT RENDERING
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function renderReport(vm) {
+  const container = $('#report-container');
+
+  const peakScoreDisplay = vm.peakSignal !== null ? `${Math.round(vm.peakSignal * 100)}%` : '—';
+  const downloadUrl = vm.jobId ? complaintUrl(vm.jobId) : null;
+
+  container.innerHTML = `
+    <!-- Overall Assessment Banner -->
+    <section class="fg-verdict-banner" data-tier="${vm.tier.key}">
+      <div class="fg-verdict-grid">
+        <div>
+          <span class="fg-verdict-badge ${vm.tier.badgeClass}">
+            ${esc(vm.verdictLabel)}
+          </span>
+          <h2 class="fg-verdict-title">${esc(vm.verdictLabel)}</h2>
+          <p class="fg-verdict-summary">${esc(vm.overallSummary)}</p>
+          <div class="fg-verdict-meta">
+            <span>Content: <b>${esc(vm.filename)}</b></span>
+            <span>Analyzed: <b>${fmtStamp(vm.startedAt)}</b></span>
+            <span>Inspection Mode: <b>${esc(vm.mode.toUpperCase())}</b></span>
+            ${vm.jobId ? `<span>Reference ID: <b>${esc(vm.jobId.slice(0, 8))}</b></span>` : ''}
+          </div>
+        </div>
+
+        <!-- Gauge Box -->
+        <div class="fg-gauge-box">
+          <div class="fg-gauge-score">${peakScoreDisplay}</div>
+          <div class="fg-gauge-label">${esc(vm.peakSignalLabel)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:1.25rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+        <button class="fg-btn fg-btn--secondary" type="button" data-route="/analyze">
+          Analyze Another File
+        </button>
+        ${downloadUrl ? `
+          <a class="fg-btn" href="${downloadUrl}" download="SEBI_SCORES_Complaint_${esc(vm.jobId || 'draft')}.txt">
+            Download Complaint Draft
+          </a>
+        ` : ''}
+      </div>
+    </section>
+
+    <!-- Modality Scorecards Grid -->
+    <div class="fg-section-header">
+      <span class="fg-section-header__eyebrow">Modality Breakdown</span>
+      <h3 class="fg-section-header__title" style="font-size:1.25rem;">Detector-Specific Findings</h3>
+      <p class="fg-section-header__desc">Each detector operates independently. Scores are not combined or fabricated.</p>
+    </div>
+
+    <div class="fg-modalities-grid">
+      <!-- 1. Video Authenticity -->
+      <article class="fg-modality-card">
+        <div class="fg-modality-card__head">
+          <h4 class="fg-modality-card__title">Video Authenticity</h4>
+          <span class="fg-modality-card__badge ${vm.videoModality.isFlagged ? 'fg-badge--high' : vm.videoModality.available ? 'fg-badge--safe' : 'fg-badge--idle'}">
+            ${esc(vm.videoModality.scoreFormatted)}
+          </span>
+        </div>
+        <div class="fg-modality-card__body">
+          <div class="fg-modality-card__status">${esc(vm.videoModality.status)}</div>
+          <div class="fg-modality-card__desc">${esc(vm.videoModality.summary)}</div>
+          ${vm.videoModality.details.length ? `
+            <div class="fg-modality-card__details">
+              ${vm.videoModality.details.map(d => `
+                <div class="fg-detail-row">
+                  <span>${esc(d.label)}</span>
+                  <span>${esc(d.value)}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      </article>
+
+      <!-- 2. Audio Check -->
+      <article class="fg-modality-card">
+        <div class="fg-modality-card__head">
+          <h4 class="fg-modality-card__title">${esc(vm.audioModality.title || 'Audio Check')}</h4>
+          <span class="fg-modality-card__badge ${vm.audioModality.badgeClass || (vm.audioModality.isFlagged ? 'fg-badge--high' : vm.audioModality.available ? 'fg-badge--safe' : 'fg-badge--idle')}">
+            ${esc(vm.audioModality.scoreFormatted)}
+          </span>
+        </div>
+        <div class="fg-modality-card__body">
+          <div class="fg-modality-card__status">${esc(vm.audioModality.status)}</div>
+          <div class="fg-modality-card__desc">${esc(vm.audioModality.summary)}</div>
+          ${vm.audioModality.details.length ? `
+            <div class="fg-modality-card__details">
+              ${vm.audioModality.details.map(d => `
+                <div class="fg-detail-row">
+                  <span>${esc(d.label)}</span>
+                  <span>${esc(d.value)}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      </article>
+
+      <!-- 3. Scam Check -->
+      <article class="fg-modality-card">
+        <div class="fg-modality-card__head">
+          <h4 class="fg-modality-card__title">${esc(vm.scamModality.title || 'Scam Check')}</h4>
+          <span class="fg-modality-card__badge ${vm.scamModality.badgeClass || (vm.scamModality.isFlagged ? 'fg-badge--high' : vm.scamModality.available ? 'fg-badge--safe' : 'fg-badge--idle')}">
+            ${esc(vm.scamModality.scoreFormatted)}
+          </span>
+        </div>
+        <div class="fg-modality-card__body">
+          <div class="fg-modality-card__status">${esc(vm.scamModality.status)}</div>
+          <div class="fg-modality-card__desc">${esc(vm.scamModality.summary)}</div>
+          <div class="fg-modality-card__details">
+            <div class="fg-detail-row">
+              <span>${esc(vm.scamModality.quotedLabel || 'Quoted Violations')}</span>
+              <span>${vm.scamModality.quotedCount}</span>
+            </div>
+            ${vm.scamModality.signals.filter(s => s.active).map(s => `
+              <div class="fg-detail-row">
+                <span>${esc(s.label)}</span>
+                <span style="color:var(--status-risk-text);font-weight:600;">Flagged (${s.score}%)</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </article>
+
+      <!-- 4. SEBI Registry Verification -->
+      <article class="fg-modality-card">
+        <div class="fg-modality-card__head">
+          <h4 class="fg-modality-card__title">SEBI Registry Verification</h4>
+          <span class="fg-modality-card__badge ${vm.registryModality.isFlagged ? 'fg-badge--high' : vm.registryModality.tier === 'low' ? 'fg-badge--safe' : 'fg-badge--idle'}">
+            ${esc(vm.registryModality.badge)}
+          </span>
+        </div>
+        <div class="fg-modality-card__body">
+          <div class="fg-modality-card__status">${esc(vm.registryModality.label)}</div>
+          <div class="fg-modality-card__desc">${esc(vm.registryModality.summary)}</div>
+          <div class="fg-modality-card__details">
+            ${vm.registryModality.claimedName ? `
+              <div class="fg-detail-row">
+                <span>Claimed Name</span>
+                <span>${esc(vm.registryModality.claimedName)}</span>
+              </div>
+            ` : ''}
+            ${vm.registryModality.claimedNumber ? `
+              <div class="fg-detail-row">
+                <span>Claimed Number</span>
+                <span>${esc(vm.registryModality.claimedNumber)}</span>
+              </div>
+            ` : ''}
+            ${vm.registryModality.matchedName ? `
+              <div class="fg-detail-row">
+                <span>Registered Entity</span>
+                <span>${esc(vm.registryModality.matchedName)}</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Quoted Evidence Audit Trail Table -->
+    <section class="fg-evidence-section">
+      <h3 style="font-size:1.15rem;margin-bottom:0.75rem;">Verified Evidence & Findings</h3>
+      ${vm.evidence.length ? `
+        <div class="fg-table-wrap">
+          <table class="fg-table">
+            <thead>
+              <tr>
+                <th style="width:60px;">ID</th>
+                <th style="width:180px;">Signal Category</th>
+                <th style="width:140px;">Source Module</th>
+                <th>Observed Evidence / Quoted Statement</th>
+                <th style="width:100px;">Timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${vm.evidence.map(item => `
+                <tr>
+                  <td><b>${esc(item.id)}</b></td>
+                  <td>${esc(item.kind)}</td>
+                  <td><span class="fg-card__tag">${esc(item.source)}</span></td>
+                  <td>
+                    <div>${esc(item.body)}</div>
+                    ${item.quote ? `<div class="fg-quote-text">"${esc(item.quote)}"</div>` : ''}
+                  </td>
+                  <td>${item.timestamp !== null ? fmtClock(item.timestamp) : '—'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <p style="color:var(--text-secondary);font-size:0.875rem;margin-bottom:0;">
+          No explicit evidence items or regulatory violations were flagged for this submission.
+        </p>
+      `}
+    </section>
+
+    <!-- Recommended Next Steps -->
+    <section class="fg-next-steps">
+      <h3 class="fg-next-steps__title">Recommended Next Steps</h3>
+      <ul class="fg-steps-list">
+        ${vm.nextSteps.map(step => `
+          <li class="fg-step-item">
+            <svg class="fg-step-item__icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            <div>
+              <div class="fg-step-item__title">${esc(step.title)}</div>
+              <p class="fg-step-item__desc">${esc(step.body)}</p>
+            </div>
+          </li>
+        `).join('')}
+      </ul>
+    </section>
+
+    <!-- Pre-Filing SEBI SCORES Complaint Draft -->
+    ${vm.scoresComplaint ? `
+      <section class="fg-complaint-box">
+        <div class="fg-complaint-box__header">
+          <h3 style="font-size:1.15rem;margin:0;">SEBI SCORES Complaint Draft (Pre-Filing Preview)</h3>
+          <button class="fg-btn fg-btn--secondary fg-btn--sm" id="copy-complaint-btn" type="button">
+            Copy Draft Text
+          </button>
+        </div>
+        <div class="fg-complaint-notice">
+          <b>Notice:</b> This draft has been generated automatically from the forensic findings above. It is provided for consumer convenience to assist when filing a formal complaint on the official SEBI SCORES portal (<a href="https://scores.sebi.gov.in" target="_blank">scores.sebi.gov.in</a>). It is not an officially submitted legal complaint.
+        </div>
+        <pre class="fg-complaint-pre" id="complaint-pre">${esc(vm.scoresComplaint)}</pre>
+      </section>
+    ` : ''}
+
+    <div style="text-align:center;margin-top:2rem;">
+      <button class="fg-btn fg-btn--secondary" type="button" data-route="/analyze">
+        Start a New Analysis
+      </button>
+    </div>
+  `;
+
+  // Attach copy button handler
+  const copyBtn = $('#copy-complaint-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const text = vm.scoresComplaint || '';
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = 'Copied to Clipboard!';
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy Draft Text';
+        }, 2000);
       });
-      showRoute('/results');
-    } catch (err) {
-      console.error('Error rendering results view model:', err);
-      showRoute('/results');
-    }
-  }, reducedMotion() ? 0 : 500);
+    });
+  }
 }
 
-function failAnalysis(error) { clearInterval(state.tipTimer); $('#core-status').textContent = 'Analysis could not finish'; showRoute('/analyze'); showError(error?.message || 'The analysis service could not finish this run.'); }
+/* ── Application Initialisation ──────────────────────────────────────────── */
 
-function tierStyle(tier) { return tier === 'critical' ? 'crit' : tier === 'high' ? 'risk' : tier === 'moderate' ? 'warn' : tier === 'low' ? 'safe' : 'flat'; }
-function renderResults(vm) {
-  const score = vm.peakSignal === null ? null : fmtScore(vm.peakSignal);
-  const modeLabel = vm.mode === 'text' ? 'Text scan' : `${vm.mode} scan`;
-  $('#results').innerHTML = `<div class="fg-band-head"><p class="fg-eyebrow">Forensic report · ${esc(modeLabel)}</p><h2 class="fg-h2">Analysis result</h2></div><section class="fg-verdict" data-tier="${vm.tier.key}"><div class="fg-verdict__grid"><div class="fg-verdict__copy"><p class="fg-eyebrow fg-eyebrow--plain">Overall risk level</p><h3 class="fg-verdict__tier">${esc(vm.tier.label)}</h3><span class="fg-verdict__code">${esc(vm.verdict)}</span><p class="fg-verdict__summary">${esc(vm.summary)}</p><div class="fg-verdict__stamps"><span class="fg-verdict__stamp">File <b>${esc(vm.filename || 'Pasted text')}</b></span><span class="fg-verdict__stamp">Analysed <b>${fmtStamp(vm.startedAt)}</b></span></div></div><div class="fg-verdict__gauge"><canvas id="verdict-gauge"></canvas><div class="fg-verdict__gauge-read"><span class="fg-verdict__score">${score ?? '—'}<small>%</small></span><span class="fg-verdict__score-label">Peak signal</span></div></div></div><div class="fg-verdict__actions"><button class="fg-btn" data-route="/analyze">Analyse another ${svg(icons.arrow, 'fg-btn__arrow')}</button>${vm.complaint ? `<a class="fg-btn fg-btn--ghost" href="${complaintUrl(vm.jobId)}" download>Download complaint draft</a>` : ''}</div></section><section><div class="fg-band-head"><p class="fg-eyebrow">Signal breakdown</p><h2 class="fg-h2">What the pipeline found</h2></div><div class="fg-breakdown">${vm.categories.map(renderCategory).join('')}</div></section><section><div class="fg-band-head"><p class="fg-eyebrow">Evidence</p><h2 class="fg-h2">Read the findings in context.</h2></div><div class="fg-disclose" id="evidence-list">${vm.evidence.length ? vm.evidence.map(renderEvidence).join('') : `<div class="fg-blank"><span class="fg-blank__mark">${svg(icons.shield)}</span><h3>No evidence items were raised</h3><p>No detector returned a finding that requires an evidence item. Review the category scores and transcript before deciding.</p></div>`}</div></section>${renderForensics(vm)}${renderMetadataSection(vm)}<div class="fg-results__end"><button class="fg-btn fg-btn--ghost" data-route="/analyze">Start a new analysis</button></div>`;
-  drawGauge($('#verdict-gauge'), vm.peakSignal, vm.tier.key);
-  bindDisclosure(); bindTranscript(vm); bindMedia(vm);
+function init() {
+  bindNavigation();
+  monitorHealth();
+  setInterval(monitorHealth, 30000);
+
+  // Mode tab switching in workspace
+  $$('.fg-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      state.mode = tab.dataset.mode;
+      state.file = null;
+      state.text = '';
+      state.urlText = '';
+      renderWorkspace();
+    });
+  });
+
+  // Show starting route
+  showRoute(state.route);
 }
 
-function renderMetadataSection(vm) {
-  const mf = vm.metadataForensics;
-  if (!mf || mf.status === 'unavailable') return '';
-  const vStream = mf.video_stream || {};
-  const emb = mf.embedded_metadata || {};
-  const obs = mf.forensic_observations || [];
-
-  const rows = [
-    emb.camera_make || emb.camera_model ? ['Device / Camera', `${emb.camera_make || ''} ${emb.camera_model || ''}`.trim()] : null,
-    emb.software_used ? ['Creation Software', emb.software_used] : null,
-    emb.encoder_software || vStream.encoder ? ['Encoder', emb.encoder_software || vStream.encoder] : null,
-    vStream.codec_name && vStream.codec_name !== 'Unknown' ? ['Video Codec', vStream.codec_name.toUpperCase()] : null,
-    vStream.resolution && vStream.resolution !== 'Unknown' ? ['Resolution', vStream.resolution] : null,
-    vStream.frame_rate ? ['Frame Rate', `${vStream.frame_rate} fps`] : null,
-    ['Metadata Completeness', (mf.completeness || 'low').toUpperCase()],
-    ['Provenance / Content Credentials', mf.provenance_status || 'not_available'],
-  ].filter(Boolean);
-
-  return `<section><div class="fg-band-head"><p class="fg-eyebrow">Provenance intelligence</p><h2 class="fg-h2">Media Metadata & Provenance</h2></div><div class="fg-disclose"><div class="fg-disclose__row" data-tier="${mf.completeness === 'low' ? 'moderate' : 'low'}"><button class="fg-disclose__btn" type="button" aria-expanded="true"><span class="fg-disclose__kind">Provenance</span><span class="fg-disclose__title">Container & Embedded Metadata Analysis</span><span class="fg-disclose__at">${esc((mf.completeness || 'standard').toUpperCase())}</span>${svg(icons.chevron, 'fg-disclose__chev')}</button><div class="fg-disclose__body"><dl class="fg-kv">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>${obs.length ? `<div style="margin-top:0.75rem;"><p style="font-weight:600;font-size:0.82rem;margin-bottom:0.35rem;">Forensic Observations:</p><ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.45;">${obs.map(o => `<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}</div></div></div></section>`;
+// Boot on DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
 }
-
-
-function renderCategory(category) {
-  const value = category.score === null ? 0 : Math.round(category.score * 100);
-  return `<article class="fg-cat" data-tier="${category.tier}"><div class="fg-cat__top"><h3 class="fg-cat__name">${esc(category.name)}</h3><div class="fg-cat__score"><b>${category.score === null ? '—' : `${value}%`}</b><span>${esc(category.status)}</span></div><div class="fg-cat__bar"><i style="width:${value}%"></i></div></div><p class="fg-cat__text">${esc(category.text)}</p><div class="fg-cat__foot"><span>${category.count} evidence item${category.count === 1 ? '' : 's'}</span>${category.detail.length ? `<button class="fg-btn fg-btn--text fg-cat__more" type="button" data-detail="${esc(category.id)}">Details ${svg(icons.chevron)}</button>` : ''}</div></article>`;
-}
-
-function renderEvidence(item) {
-  return `<div class="fg-disclose__row" data-tier="${item.tier}"><button class="fg-disclose__btn" type="button" aria-expanded="false"><span class="fg-disclose__kind">${esc(item.kind)}</span><span class="fg-disclose__title">${esc(item.title)}</span><span class="fg-disclose__at">${item.at === null ? '—' : fmtClock(item.at)}</span>${svg(icons.chevron, 'fg-disclose__chev')}</button><div class="fg-disclose__body" hidden><p>${esc(item.body)}</p>${item.quote ? `<blockquote class="fg-quote">${esc(item.quote)}</blockquote>` : ''}${item.kv ? `<dl class="fg-kv">${item.kv.map(([key, value]) => `<div><dt>${esc(key)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>` : ''}</div></div>`;
-}
-
-function bindDisclosure() { $$('.fg-disclose__btn').forEach((button) => button.addEventListener('click', () => { const body = button.nextElementSibling; const open = button.getAttribute('aria-expanded') === 'true'; button.setAttribute('aria-expanded', String(!open)); body.hidden = open; })); }
-
-function renderForensics(vm) {
-  const mediaSource = state.file && state.previewUrl ? (state.mode === 'video' ? `<video src="${state.previewUrl}" controls></video>` : state.mode === 'audio' ? `<audio src="${state.previewUrl}" controls></audio>` : `<img src="${state.previewUrl}" alt="Analysed image">`) : '<div class="fg-media__empty">Media preview is available in this browser session only.</div>';
-  const media = vm.mode === 'text' ? '' : `<section class="fg-panel"><div class="fg-panel__head"><h3>Submitted media</h3></div><div class="fg-media__stage">${mediaSource}</div></section>`;
-  const transcript = vm.transcript.length ? vm.transcript.map((line, index) => `<button class="fg-line" data-start="${line.start}" data-line="${index}" ${line.flag ? `data-flag="${line.flag}"` : ''}><span class="fg-line__at">${fmtClock(line.start)}</span><span class="fg-line__text">${esc(line.text)}${line.flagLabel ? `<span class="fg-line__mark" data-tier="${line.flagTier}">${esc(line.flagLabel)}</span>` : ''}</span></button>`).join('') : `<div class="fg-blank"><h3>No timestamped transcript</h3><p>This scan did not return timestamped speech segments.</p></div>`;
-  return `<section><div class="fg-band-head"><p class="fg-eyebrow">Media evidence</p><h2 class="fg-h2">Inspect the timeline and transcript.</h2></div><div class="fg-forensics">${media}<section class="fg-panel"><div class="fg-panel__head"><h3>Interactive transcript</h3></div><div class="fg-transcript" id="transcript">${transcript}</div></section></div></section>`;
-}
-
-function bindTranscript(vm) { $$('.fg-line').forEach((line) => line.addEventListener('click', () => { $$('.fg-line').forEach((item) => item.dataset.playing = 'false'); line.dataset.playing = 'true'; })); }
-function bindMedia() { /* Media URLs are intentionally not returned by the backend after its purge. */ }
-
-function animateCore(canvas, kind) {
-  if (!canvas) return;
-  const stop = whileVisible(canvas, (time) => { const { ctx, w, h } = fitCanvas(canvas); const cx = w / 2; const cy = h / 2; const radius = Math.min(w, h) * 0.32; ctx.clearRect(0, 0, w, h); ctx.strokeStyle = 'rgba(11,107,79,.14)'; ctx.lineWidth = 1; for (let i = 0; i < 3; i += 1) { ctx.beginPath(); ctx.arc(cx, cy, radius + i * 30 + Math.sin(time / 1800 + i) * 3, 0, Math.PI * 2); ctx.stroke(); } ctx.strokeStyle = 'rgba(11,107,79,.5)'; ctx.beginPath(); ctx.moveTo(cx, cy - radius); ctx.lineTo(cx + radius * .72, cy - radius * .2); ctx.lineTo(cx + radius * .45, cy + radius); ctx.lineTo(cx - radius * .45, cy + radius); ctx.lineTo(cx - radius * .72, cy - radius * .2); ctx.closePath(); ctx.stroke(); ctx.fillStyle = 'rgba(11,107,79,.05)'; ctx.fill(); if (!reducedMotion()) { ctx.fillStyle = '#0B6B4F'; const angle = time / (kind === 'core' ? 1900 : 2400); ctx.beginPath(); ctx.arc(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 3, 0, Math.PI * 2); ctx.fill(); } });
-  canvas.dataset.stop = stop;
-}
-
-function drawGauge(canvas, value, tier) {
-  if (!canvas) return;
-  const { ctx, w, h } = fitCanvas(canvas); const cx = w / 2; const cy = h / 2; const r = Math.min(w, h) * .38; const colors = { low: '#0B6B4F', moderate: '#A8730B', high: '#B33A2B', critical: '#8A1F14', unknown: '#A3ADA8' }; ctx.clearRect(0, 0, w, h); ctx.lineWidth = 9; ctx.strokeStyle = '#E4E9E6'; ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI * .75, Math.PI * .75); ctx.stroke(); if (value !== null) { ctx.strokeStyle = colors[tier] || colors.unknown; ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI * .75, -Math.PI * .75 + Math.PI * 1.5 * value); ctx.stroke(); } }
-
-function renderTechnology() { $('#tech-stages').innerHTML = TECHNOLOGY_STAGES.map((stage) => `<li class="fg-disclose__row"><button class="fg-disclose__btn" type="button" aria-expanded="false"><span class="fg-disclose__kind">${stage.n}</span><span class="fg-disclose__title">${esc(stage.title)}</span><span class="fg-disclose__at">${esc(stage.out)}</span>${svg(icons.chevron, 'fg-disclose__chev')}</button><div class="fg-disclose__body" hidden><p>${esc(stage.body)}</p></div></li>`).join(''); bindDisclosure(); }
-
-bindNavigation();
-renderTechnology();
-$$('.fg-mode').forEach((button) => button.addEventListener('click', () => { state.mode = button.dataset.mode; state.file = null; state.text = ''; clearError(); renderWork(); }));
-showRoute(state.route);
-setHealth();
-initIntro();
-animateCore($('#hero-canvas'), 'hero');
-animateCore($('#cta-canvas'), 'cta');

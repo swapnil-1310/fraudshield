@@ -54,7 +54,11 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
     
     result = {
         "verdict": "not claimed",
+        "match_status": "absent",  # "confirmed" | "uncertain" | "absent"
+        "entity_type": None,
         "matched_entity": None,
+        "is_conclusive_fraud": False,
+        "explanation": "No financial advisor or entity registration claimed.",
         "snapshot_date": "August 2026",
         "disclaimer": "Evaluated against local SEBI registry snapshot (August 2026). Final regulatory status must be cross-verified on official sebi.gov.in portal."
     }
@@ -73,6 +77,10 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
         clean_reg_no = claimed_reg_no.upper().replace(" ", "").replace("-", "").strip()
         if not re.match(r"^IN[A-Z]{1,3}[0-9]{4,12}$", clean_reg_no):
             result["verdict"] = "malformed number"
+            result["match_status"] = "uncertain"
+            result["entity_type"] = None
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = f"Claimed registration number '{claimed_reg_no}' has a malformed format (does not match SEBI IN... pattern)."
             print(f"[{job_id}] Verdict: Malformed registration number format: {claimed_reg_no}")
             return result
         claimed_reg_no = clean_reg_no
@@ -87,6 +95,10 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
     if not registry:
         print(f"[{job_id}] Warning: Registry is empty or file not found at {source_file}.")
         result["verdict"] = "not found"
+        result["match_status"] = "absent"
+        result["entity_type"] = None
+        result["is_conclusive_fraud"] = False
+        result["explanation"] = "Local SEBI registry snapshot is currently unavailable. Cross-verify on official sebi.gov.in."
         return result
 
     # Check by Registration Number (Strongest check)
@@ -94,6 +106,7 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
         matched_entity = next((item for item in registry if item.get("registration_number", "").upper() == claimed_reg_no), None)
         
         if matched_entity:
+            entity_type = matched_entity.get("type", "Unknown")
             # Number exists, check if name or any alias matches (fuzzy)
             if claimed_name:
                 possible_names = [matched_entity.get("name", "")] + matched_entity.get("aliases", [])
@@ -103,18 +116,36 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
                 )
                 if best_score > name_number_thresh:
                     result["verdict"] = "verified"
+                    result["match_status"] = "confirmed"
                     result["matched_entity"] = matched_entity
+                    result["entity_type"] = entity_type
+                    result["is_conclusive_fraud"] = False
+                    result["explanation"] = f"Confirmed match in SEBI registry: '{matched_entity.get('name')}' registered as {entity_type} (Reg No: {claimed_reg_no})."
                     print(f"[{job_id}] Verdict: Verified (Match score: {best_score})")
                 else:
                     result["verdict"] = "name-number mismatch"
+                    result["match_status"] = "uncertain"
+                    result["matched_entity"] = None
+                    result["entity_type"] = entity_type
+                    result["is_conclusive_fraud"] = False
+                    result["explanation"] = f"Registration number {claimed_reg_no} is registered to '{matched_entity.get('name')}' ({entity_type}), but speaker claimed '{claimed_name}'."
                     print(f"[{job_id}] Verdict: Name-Number Mismatch. Registered to {matched_entity.get('name')}, claimed {claimed_name}.")
             else:
                 result["verdict"] = "verified"
+                result["match_status"] = "confirmed"
                 result["matched_entity"] = matched_entity
+                result["entity_type"] = entity_type
+                result["is_conclusive_fraud"] = False
+                result["explanation"] = f"Confirmed registration number in SEBI registry: '{matched_entity.get('name')}' registered as {entity_type}."
                 print(f"[{job_id}] Verdict: Verified (Number only).")
             return result
         else:
             result["verdict"] = "not found"
+            result["match_status"] = "absent"
+            result["matched_entity"] = None
+            result["entity_type"] = None
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = f"Registration number '{claimed_reg_no}' is absent from local SEBI registry snapshot. Absence alone is not conclusive proof of fraud; cross-verification on official sebi.gov.in is recommended."
             print(f"[{job_id}] Verdict: Registration number {claimed_reg_no} not found in registry.")
             return result
             
@@ -129,6 +160,10 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
                 
         if not candidates:
             result["verdict"] = "not found"
+            result["match_status"] = "absent"
+            result["entity_type"] = None
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = f"Advisor name '{claimed_name}' absent from registry snapshot. Absence alone is not conclusive proof of fraud; verify on official sebi.gov.in."
             return result
             
         candidate_strings = [c[0] for c in candidates]
@@ -137,11 +172,37 @@ def run_stage6_registry(sebi_analysis: dict, job_id: str):
         if best_match and best_match[1] >= name_only_thresh:  # threshold from config
             matched_tuple = next((c for c in candidates if c[0] == best_match[0]), None)
             matched_entity = matched_tuple[1] if matched_tuple else None
+            entity_type = matched_entity.get("type", "Unknown") if matched_entity else None
             result["verdict"] = "verified"
+            result["match_status"] = "confirmed"
             result["matched_entity"] = matched_entity
-            print(f"[{job_id}] Verdict: Verified by Name/Alias '{best_match[0]}' (Score: {best_match[1]}). Entity: {matched_entity.get('name')}")
+            result["entity_type"] = entity_type
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = f"Confirmed match in SEBI registry for '{matched_entity.get('name') if matched_entity else best_match[0]}' ({entity_type})."
+            print(f"[{job_id}] Verdict: Verified by Name/Alias '{best_match[0]}' (Score: {best_match[1]}). Entity: {matched_entity.get('name') if matched_entity else 'Unknown'}")
+        elif best_match and best_match[1] >= name_number_thresh:
+            matched_tuple = next((c for c in candidates if c[0] == best_match[0]), None)
+            matched_entity = matched_tuple[1] if matched_tuple else None
+            entity_type = matched_entity.get("type", "Unknown") if matched_entity else None
+            result["verdict"] = "uncertain match"
+            result["match_status"] = "uncertain"
+            result["matched_entity"] = matched_entity
+            result["entity_type"] = entity_type
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = (
+                f"Uncertain registry match for claimed name '{claimed_name}'. "
+                f"Closest registered entity is '{matched_entity.get('name') if matched_entity else best_match[0]}' "
+                f"({entity_type}) with similarity {best_match[1]:.0f}%. "
+                f"Cross-verification on official sebi.gov.in is recommended."
+            )
+            print(f"[{job_id}] Verdict: Uncertain match for '{claimed_name}'. Closest: '{best_match[0]}' ({best_match[1]}%).")
         else:
             result["verdict"] = "not found"
+            result["match_status"] = "absent"
+            result["matched_entity"] = None
+            result["entity_type"] = None
+            result["is_conclusive_fraud"] = False
+            result["explanation"] = f"Advisor name '{claimed_name}' absent from local SEBI registry snapshot. Absence alone is not conclusive proof of fraud; verify on official sebi.gov.in."
             print(f"[{job_id}] Verdict: Name '{claimed_name}' not found in registry. Best match was '{best_match[0] if best_match else 'None'}' ({best_match[1] if best_match else 0}%).")
             
     return result

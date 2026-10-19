@@ -125,7 +125,8 @@ def run_stage4_transcription(audio_path: str, job_id: str):
 
         result["segments"] = extracted_segments
         result["transcript"] = " ".join(s["text"] for s in extracted_segments)
-        print(f"[{job_id}] Transcription complete. Extracted {len(result['segments'])} segments: '{result['transcript'][:60]}...'")
+        safe_preview = result["transcript"][:60].encode("ascii", errors="backslashreplace").decode("ascii")
+        print(f"[{job_id}] Transcription complete. Extracted {len(result['segments'])} segments: '{safe_preview}...'")
         
     except Exception as e:
         print(f"[{job_id}] Transcription stage failed: {e}")

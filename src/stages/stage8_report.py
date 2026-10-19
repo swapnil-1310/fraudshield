@@ -1,6 +1,6 @@
 import datetime
 from typing import Dict, Any
-from src.config import get_threshold
+from src.config import get_threshold, get_vision_threshold
 
 def generate_sebi_scores_complaint(data: Dict[str, Any], content_type: str = "Video") -> str:
     """
@@ -58,8 +58,19 @@ def generate_sebi_scores_complaint(data: Dict[str, Any], content_type: str = "Vi
     quality_info = data.get("input_quality", {})
     quality_rating = quality_info.get("rating", "Standard") if isinstance(quality_info, dict) else "Standard"
 
-    vision_thresh = get_threshold("vision_fake_threshold", 0.5)
+    vision_thresh = get_vision_threshold()
     audio_thresh = get_threshold("audio_fake_threshold", 0.5)
+
+    if vision_score is not None:
+        vision_str = f"{vision_score * 100:.1f}% {'(SYNTHETIC FACE MANIPULATION DETECTED)' if vision_score > vision_thresh else '(Within Normal Parameters)'}"
+    else:
+        vision_str = "Not Applicable (Audio/Text Only Scan)"
+
+    if audio_score is not None:
+        audio_str = f"{audio_score * 100:.1f}% {'(SYNTHETIC VOICE CLONING DETECTED)' if audio_score > audio_thresh else '(Within Normal Parameters)'}"
+    else:
+        audio_str = "Not Applicable (Visual/Text Only Scan)"
+
     complaint = f"""================================================================================
            SECURITIES AND EXCHANGE BOARD OF INDIA (SEBI)
    PRE-FILING EVIDENCE DOSSIER — SCORES / MARKET SURVEILLANCE REVIEW
@@ -88,8 +99,8 @@ Channel / Medium of Fraud    : Digital {content_type} (Social Media / Web Transm
 --------------------------------------------------------------------------------
 2. AI FORENSIC EVIDENCE ASSESSMENT
 --------------------------------------------------------------------------------
-• Visual Deepfake Confidence  : {vision_score * 100:.1f}% {"(SYNTHETIC FACE MANIPULATION DETECTED)" if vision_score > vision_thresh else "(Within Normal Parameters)"}
-• Audio Spoof Confidence     : {audio_score * 100:.1f}% {"(SYNTHETIC VOICE CLONING DETECTED)" if audio_score > audio_thresh else "(Within Normal Parameters)"}
+• Visual Deepfake Confidence  : {vision_str}
+• Audio Spoof Confidence     : {audio_str}
 • Forensic Analyst Notes      : {sebi.get("reasoning", "Evidence points to non-compliant financial advisory distribution.")}
 
 --------------------------------------------------------------------------------

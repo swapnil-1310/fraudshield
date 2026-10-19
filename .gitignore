@@ -1,5 +1,5 @@
 # ==============================================================================
-# FinGuard — Git Ignore Configuration
+# FraudShield — Git Ignore Configuration
 # ==============================================================================
 
 # Environment & Secrets (Never commit live credentials)
@@ -10,6 +10,7 @@
 
 # Python Virtual Environments
 .venv/
+.venv_gpu/
 env/
 venv/
 ENV/
@@ -25,22 +26,59 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Machine Learning Checkpoints & Model Weights (Download dynamically)
+# Machine Learning Checkpoints & Model Weights (Downloaded dynamically)
 *.pth
 *.pt
 *.bin
 *.safetensors
 *.onnx
 *.tflite
+experiments/
+data/
 
-# Ephemeral Runtime Scratchpads (Preserve directory structure)
-temp/*
+# Ephemeral Runtime Scratchpads
+temp/
 !temp/.gitkeep
 
 # Evaluation Benchmark Dumps & Datasets
 dataset/
 tests/*.csv
 *.csv.bak
+reports/
+test_vid/
+
+# Raw media files
+*.mp4
+*.wav
+*.mp3
+*.mov
+*.avi
+!static/videos/*.mp4
+
+# Unnecessary internal / hackathon guide files
+HACKATHON_GUIDE.md
+TEAM_ONBOARDING_GUIDE.md
+SKILL G Project Status..pdf
+GIT_HISTORY_HYGIENE_PROPOSAL.md
+PHASE1_REPORT.md
+PHASE3_REPORT.md
+PROJECT_UPDATE.md
+progress1.md
+REPO_AUDIT.md
+DOCUMENTATION.md
+PROJECT_GUIDE.md
+model.py
+static/legacy-index.html
+scripts/evaluate_*
+scripts/experiment*
+scripts/prepare_ood_dataset.py
+scripts/validate_end_to_end.py
+scripts/compile_post_fix_summary.py
+scripts/demo_video_evaluator.py
+scripts/generate_expanded_report.py
+scripts/e2e_system_test.py
+scripts/run_folder_test.py
+scripts/self_test.py
 
 # IDE, OS & System Metadata
 .DS_Store

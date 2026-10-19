@@ -30,6 +30,7 @@ def run_stage1_ingest(video_path: str, temp_dir: str, job_id: str):
     result = {
         "audio_path": None,
         "face_frames_paths": [],
+        "keyframes": [],
         "quality_assessment": {
             "rating": "Unknown",
             "sharpness_score": 0.0,
@@ -116,7 +117,10 @@ def run_stage1_ingest(video_path: str, temp_dir: str, job_id: str):
         frame_count = 0
         extracted_count = 0
         prev_gray = None
+        prev_kf_gray = None
         sharpness_list = []
+        max_ocr_keyframes = stage_config.get("max_ocr_keyframes", 5)
+        kf_interval = max(1, total_frames // max_ocr_keyframes)
         
         while cap.isOpened() and extracted_count < target_frames:
             ret, frame = cap.read()
@@ -160,6 +164,24 @@ def run_stage1_ingest(video_path: str, temp_dir: str, job_id: str):
                         face_img.save(out_path)
                         result["face_frames_paths"].append(out_path)
                         extracted_count += 1
+
+                # Keyframe extraction for OCR: full video frame with timestamp tracking
+                if (frame_count % kf_interval == 0 or is_scene_cut) and len(result["keyframes"]) < max_ocr_keyframes:
+                    should_save_kf = True
+                    if prev_kf_gray is not None:
+                        kf_diff = float(np.mean(cv2.absdiff(gray, prev_kf_gray)))
+                        if kf_diff < 8.0:  # Near-identical to previous keyframe, skip duplicate
+                            should_save_kf = False
+                    if should_save_kf:
+                        kf_path = os.path.join(temp_dir, f"{job_id}_keyframe_{len(result['keyframes'])}.jpg")
+                        cv2.imwrite(kf_path, frame)
+                        timestamp_sec = round(frame_count / fps, 2)
+                        result["keyframes"].append({
+                            "path": kf_path,
+                            "timestamp_sec": timestamp_sec,
+                            "frame_index": frame_count
+                        })
+                        prev_kf_gray = gray
             
             frame_count += 1
             

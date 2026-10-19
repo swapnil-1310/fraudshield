@@ -470,7 +470,10 @@ def _build_forensic_observations(
 
     # 8. Provenance / C2PA
     if provenance.get("c2pa_manifest_detected"):
-        obs.append("Content Credentials / C2PA provenance manifest structure detected")
+        obs.append(
+            "Content Credentials (C2PA) provenance manifest detected: "
+            "Certifies media lineage or generative AI asset declarations; distinct from biometric face-swap or manipulation evidence."
+        )
         points += 2
     else:
         obs.append("No Content Credentials (C2PA) provenance manifest detected")
